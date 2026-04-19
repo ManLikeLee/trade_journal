@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from './api';
+import axios from 'axios';
 
 interface User {
   id: string;
@@ -34,11 +35,7 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email, password) => {
         try {
-          alert('[login] start: ' + email);
-          console.log('[login] start', { email });
           const { data } = await api.post('/auth/login', { email, password });
-          alert('[login] got tokens: ' + JSON.stringify(data));
-          console.log('[login] got tokens', data);
           set({
             accessToken: data.accessToken,
             refreshToken: data.refreshToken,
@@ -48,17 +45,12 @@ export const useAuthStore = create<AuthState>()(
           if (typeof window !== 'undefined') {
             document.cookie = `tj-auth=${data.refreshToken}; path=/; SameSite=Lax`;
           }
-          alert('[login] fetching /users/me');
-          console.log('[login] fetching /users/me');
           const me = await api.get('/users/me', {
             headers: { Authorization: `Bearer ${data.accessToken}` },
             timeout: 5000,
           });
-          alert('[login] got user: ' + JSON.stringify(me.data));
-          console.log('[login] got user', me.data);
           set({ user: me.data });
         } catch (e) {
-          alert('AuthStore login error: ' + (e?.message || e));
           console.error('AuthStore login error:', e);
           throw e;
         }
@@ -98,8 +90,15 @@ export const useAuthStore = create<AuthState>()(
         const { refreshToken } = get();
         if (!refreshToken) return null;
         try {
-          const { data } = await api.post('/auth/refresh', { refreshToken });
+          const { data } = await axios.post(
+            `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'}/auth/refresh`,
+            { refreshToken },
+            { timeout: 15000, headers: { 'Content-Type': 'application/json' } },
+          );
           set({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+          if (typeof window !== 'undefined') {
+            document.cookie = `tj-auth=${data.refreshToken}; path=/; SameSite=Lax`;
+          }
           return data.accessToken;
         } catch {
           set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false });
@@ -107,6 +106,14 @@ export const useAuthStore = create<AuthState>()(
         }
       },
     }),
-    { name: 'tradejournal-auth', partialize: (s) => ({ refreshToken: s.refreshToken, user: s.user }) }
+    {
+      name: 'tradejournal-auth',
+      partialize: (s) => ({
+        user: s.user,
+        accessToken: s.accessToken,
+        refreshToken: s.refreshToken,
+        isAuthenticated: s.isAuthenticated,
+      }),
+    }
   )
 );

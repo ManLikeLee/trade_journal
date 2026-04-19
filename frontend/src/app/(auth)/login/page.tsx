@@ -23,13 +23,11 @@ export default function LoginPage() {
   });
 
   const onSubmit = async (data: any) => {
-    alert('[login page] onSubmit called');
     setError('');
     try {
       await login(data.email, data.password);
       router.push('/dashboard');
     } catch (e) {
-      alert('[login page] error: ' + (e?.message || e));
       console.error('Login error:', e);
       setError('Invalid email or password');
     }

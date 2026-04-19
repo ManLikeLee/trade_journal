@@ -81,7 +81,7 @@ model Trade {
   accountId      String       @map("account_id")
 
   // Identity — used for idempotency on MT4/MT5 sync
-  externalTicket String?      @unique @map("external_ticket")
+  externalTicket String?      @map("external_ticket")
 
   // Instrument
   symbol         String
@@ -118,6 +118,7 @@ model Trade {
   tradeTags      TradeTag[]
 
   @@index([accountId])
+  @@unique([accountId, externalTicket])
   @@index([openTime])
   @@index([symbol])
   @@index([status])
