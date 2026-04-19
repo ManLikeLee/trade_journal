@@ -13,24 +13,24 @@ interface StatCardProps {
 
 export function StatCard({ label, value, subValue, trend, icon: Icon, colorClass, loading }: StatCardProps) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-3">
+    <div className="dashboard-card p-3 sm:p-3.5 flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.04em]">{label}</span>
         {Icon && (
-          <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center', colorClass ?? 'bg-primary/10')}>
-            <Icon className={cn('w-4 h-4', colorClass ? 'text-current' : 'text-primary')} />
+          <div className={cn('w-6 h-6 rounded-md flex items-center justify-center', colorClass ?? 'bg-primary/10')}>
+            <Icon className={cn('w-3.5 h-3.5', colorClass ? 'text-current' : 'text-primary')} />
           </div>
         )}
       </div>
       {loading ? (
-        <div className="h-7 w-24 rounded bg-muted animate-pulse" />
+        <div className="dashboard-skeleton h-6 w-24" />
       ) : (
         <div>
-          <span className={cn('text-2xl font-semibold tabular-nums', colorClass?.includes('profit') ? 'text-profit' : colorClass?.includes('loss') ? 'text-loss' : '')}>
+          <span className={cn('text-[26px] leading-none font-medium tabular-nums', colorClass?.includes('profit') ? 'text-profit' : colorClass?.includes('loss') ? 'text-loss' : '')}>
             {value}
           </span>
           {subValue && (
-            <p className="text-xs text-muted-foreground mt-0.5">{subValue}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">{subValue}</p>
           )}
         </div>
       )}

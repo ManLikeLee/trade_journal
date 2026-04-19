@@ -9,18 +9,18 @@ export default function TradesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   return (
-    <div className="p-6 space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="app-page">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-xl font-semibold">Trade Log</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">All your trades — sortable, filterable, searchable</p>
+          <h1 className="app-title">Trade log</h1>
+          <p className="app-subtitle">All your trades, sortable and filterable</p>
         </div>
         <Link
           href="/trades/new"
-          className="flex items-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          className="ui-btn-primary"
         >
-          <PlusCircle className="w-4 h-4" />
-          Log Trade
+          <PlusCircle className="w-3.5 h-3.5" />
+          Log trade
         </Link>
       </div>
 

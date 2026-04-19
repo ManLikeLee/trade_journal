@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { useCreateTrade, useAccounts } from '@/hooks/useTrades';
 import { formatCurrency, cn } from '@/lib/utils';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { ArrowDownRight, ArrowUpRight, Calculator } from 'lucide-react';
 
 const schema = z.object({
@@ -88,46 +88,46 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       {/* Account */}
       <div className="space-y-1.5">
-        <label className="text-sm font-medium">Account</label>
+        <label className="ui-label">Account</label>
         <select {...register('accountId')}
-          className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+          className="ui-select">
           <option value="">Select account…</option>
           {accounts?.map((a: any) => (
             <option key={a.id} value={a.id}>{a.name} — {a.broker}</option>
           ))}
         </select>
-        {errors.accountId && <p className="text-xs text-destructive">{errors.accountId.message}</p>}
+        {errors.accountId && <p className="ui-error">{errors.accountId.message}</p>}
       </div>
 
       {/* Symbol + Direction */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium">Symbol</label>
+          <label className="ui-label">Symbol</label>
           <input {...register('symbol')}
             placeholder="EURUSD"
-            className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-ring" />
-          {errors.symbol && <p className="text-xs text-destructive">{errors.symbol.message}</p>}
+            className="ui-input-mono uppercase" />
+          {errors.symbol && <p className="ui-error">{errors.symbol.message}</p>}
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-sm font-medium">Direction</label>
+          <label className="ui-label">Direction</label>
           <Controller
             name="direction"
             control={control}
             render={({ field }) => (
-              <div className="flex rounded-lg border border-input overflow-hidden h-10">
+              <div className="flex rounded-md border border-input overflow-hidden h-9">
                 {(['BUY', 'SELL'] as const).map((dir) => (
                   <button
                     key={dir}
                     type="button"
                     onClick={() => field.onChange(dir)}
                     className={cn(
-                      'flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold transition-colors',
+                      'flex-1 flex items-center justify-center gap-1 text-xs font-medium transition-colors',
                       field.value === dir
-                        ? dir === 'BUY' ? 'bg-profit text-white' : 'bg-loss text-white'
+                        ? dir === 'BUY' ? 'bg-[#EAF3DE] text-[#27500A]' : 'bg-[#FCEBEB] text-[#791F1F]'
                         : 'text-muted-foreground hover:bg-accent',
                     )}
                   >
@@ -144,110 +144,110 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
       </div>
 
       {/* Lot size + Entry */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium">Lot Size</label>
+          <label className="ui-label">Lot Size</label>
           <input {...register('lotSize')} type="number" step="0.01" placeholder="0.10"
-            className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
-          {errors.lotSize && <p className="text-xs text-destructive">{errors.lotSize.message}</p>}
+            className="ui-input-mono" />
+          {errors.lotSize && <p className="ui-error">{errors.lotSize.message}</p>}
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium">Entry Price</label>
+          <label className="ui-label">Entry Price</label>
           <input {...register('entryPrice')} type="number" step="0.00001" placeholder="1.08540"
-            className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+            className="ui-input-mono" />
         </div>
       </div>
 
       {/* Exit + SL + TP */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
           { name: 'exitPrice',  label: 'Exit Price',   placeholder: '1.08820' },
           { name: 'stopLoss',   label: 'Stop Loss',    placeholder: '1.08200' },
           { name: 'takeProfit', label: 'Take Profit',  placeholder: '1.09100' },
         ].map(({ name, label, placeholder }) => (
           <div key={name} className="space-y-1.5">
-            <label className="text-sm font-medium text-muted-foreground">{label}</label>
+            <label className="ui-label">{label}</label>
             <input {...register(name as any)} type="number" step="0.00001" placeholder={placeholder}
-              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+              className="ui-input-mono" />
           </div>
         ))}
       </div>
 
       {/* Auto-computed preview */}
       {(pnlPreview !== null || rrPreview !== null) && (
-        <div className="flex items-center gap-4 p-3 rounded-lg bg-muted/50 border border-border">
+        <div className="flex items-center gap-4 p-3 rounded-md bg-muted/45 border border-border">
           <Calculator className="w-4 h-4 text-muted-foreground shrink-0" />
           {pnlPreview !== null && (
             <div>
-              <p className="text-xs text-muted-foreground">Estimated P&L</p>
-              <p className={cn('text-sm font-semibold tabular-nums', pnlPreview >= 0 ? 'text-profit' : 'text-loss')}>
+              <p className="ui-help">Estimated P&L</p>
+              <p className={cn('text-xs font-medium tabular-nums', pnlPreview >= 0 ? 'text-profit' : 'text-loss')}>
                 {pnlPreview >= 0 ? '+' : ''}{formatCurrency(pnlPreview)}
               </p>
             </div>
           )}
           {rrPreview !== null && (
             <div className="border-l border-border pl-4">
-              <p className="text-xs text-muted-foreground">Risk : Reward</p>
-              <p className="text-sm font-semibold">1 : {rrPreview}</p>
+              <p className="ui-help">Risk : Reward</p>
+              <p className="text-xs font-medium">1 : {rrPreview}</p>
             </div>
           )}
         </div>
       )}
 
       {/* Dates */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium">Open Time</label>
+          <label className="ui-label">Open Time</label>
           <input {...register('openTime')} type="datetime-local"
-            className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+            className="ui-input" />
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-muted-foreground">Close Time</label>
+          <label className="ui-label">Close Time</label>
           <input {...register('closeTime')} type="datetime-local"
-            className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+            className="ui-input" />
         </div>
       </div>
 
       {/* Commission + Swap */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-muted-foreground">Commission</label>
+          <label className="ui-label">Commission</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
             <input {...register('commission')} type="number" step="0.01" placeholder="0.00"
-              className="w-full h-10 pl-7 pr-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+              className="ui-input-mono pl-7" />
           </div>
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-muted-foreground">Swap</label>
+          <label className="ui-label">Swap</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
             <input {...register('swap')} type="number" step="0.01" placeholder="0.00"
-              className="w-full h-10 pl-7 pr-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+              className="ui-input-mono pl-7" />
           </div>
         </div>
       </div>
 
       {/* Error summary */}
       {createTrade.isError && (
-        <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-sm text-destructive">
+        <div className="p-3 rounded-md bg-loss/10 border border-loss/20 text-xs text-loss">
           Failed to save trade. Please check the form and try again.
         </div>
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-3 pt-2">
+      <div className="flex items-center gap-2 pt-1">
         <button
           type="submit"
           disabled={isSubmitting || createTrade.isPending}
-          className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          className="ui-btn-primary flex-1"
         >
           {isSubmitting || createTrade.isPending ? 'Saving…' : 'Save Trade'}
         </button>
         <button
           type="button"
           onClick={() => router.back()}
-          className="h-10 px-4 rounded-lg border border-input text-sm hover:bg-accent transition-colors"
+          className="ui-btn-secondary"
         >
           Cancel
         </button>

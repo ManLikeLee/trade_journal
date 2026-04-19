@@ -17,10 +17,10 @@ function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   const { equity, pnl } = payload[0].payload as Point;
   return (
-    <div className="bg-card border border-border rounded-lg shadow-lg px-3 py-2 text-sm">
-      <p className="text-muted-foreground mb-1">{format(new Date(label), 'MMM d, yyyy HH:mm')}</p>
-      <p className="font-semibold">{formatCurrency(equity)}</p>
-      <p className={pnl >= 0 ? 'text-profit text-xs' : 'text-loss text-xs'}>
+    <div className="bg-card border border-border rounded-md px-2.5 py-2 text-xs">
+      <p className="text-muted-foreground mb-0.5">{format(new Date(label), 'MMM d, yyyy HH:mm')}</p>
+      <p className="font-medium">{formatCurrency(equity)}</p>
+      <p className={pnl >= 0 ? 'text-profit text-[11px]' : 'text-loss text-[11px]'}>
         {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}
       </p>
     </div>
@@ -29,11 +29,11 @@ function CustomTooltip({ active, payload, label }: any) {
 
 export function EquityCurve({ data, loading }: EquityCurveProps) {
   if (loading) {
-    return <div className="h-64 rounded-xl bg-muted animate-pulse" />;
+    return <div className="dashboard-skeleton h-[180px]" />;
   }
   if (!data?.length) {
     return (
-      <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">
+      <div className="dashboard-empty h-[180px] min-h-0">
         No closed trades yet
       </div>
     );
@@ -45,27 +45,27 @@ export function EquityCurve({ data, loading }: EquityCurveProps) {
   const gradientId = `eq-gradient-${isUp ? 'up' : 'dn'}`;
 
   return (
-    <ResponsiveContainer width="100%" height={256}>
-      <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={180}>
+      <AreaChart data={data} margin={{ top: 2, right: 2, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%"  stopColor={strokeColor} stopOpacity={0.18} />
             <stop offset="95%" stopColor={strokeColor} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.45} vertical={false} />
         <XAxis
           dataKey="date"
           tickFormatter={(v) => format(new Date(v), 'MMM d')}
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
           axisLine={false} tickLine={false}
           interval="preserveStartEnd"
         />
         <YAxis
           tickFormatter={(v) => `$${(v / 1000).toFixed(1)}k`}
-          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
           axisLine={false} tickLine={false}
-          width={52}
+          width={42}
         />
         <Tooltip content={<CustomTooltip />} />
         <ReferenceLine y={startEquity} stroke="hsl(var(--border))" strokeDasharray="4 4" />
@@ -73,7 +73,7 @@ export function EquityCurve({ data, loading }: EquityCurveProps) {
           type="monotone"
           dataKey="equity"
           stroke={strokeColor}
-          strokeWidth={2}
+          strokeWidth={1.6}
           fill={`url(#${gradientId})`}
           dot={false}
           activeDot={{ r: 4, strokeWidth: 0 }}

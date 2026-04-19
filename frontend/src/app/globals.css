@@ -12,17 +12,17 @@
     --popover-foreground: 224 71% 4%;
     --primary: 220 90% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 96%;
+    --secondary: 220 17% 97%;
     --secondary-foreground: 220 9% 46%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 220 14% 96%;
+    --muted: 220 17% 97%;
+    --muted-foreground: 220 9% 44%;
+    --accent: 220 17% 97%;
     --accent-foreground: 220 90% 56%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
+    --border: 220 13% 90%;
+    --input: 220 13% 90%;
     --ring: 220 90% 56%;
-    --radius: 0.625rem;
-    --sidebar-width: 240px;
+    --radius: 0.5rem;
+    --sidebar-width: 208px;
   }
 
   .dark {
@@ -51,6 +51,117 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .app-page {
+    @apply p-4 sm:p-5 space-y-3.5 animate-fade-in;
+  }
+
+  .app-page-narrow {
+    @apply p-4 sm:p-5 space-y-3.5 animate-fade-in max-w-3xl;
+  }
+
+  .app-page-header {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .app-title {
+    @apply text-base font-medium text-foreground;
+  }
+
+  .app-subtitle {
+    @apply text-xs text-muted-foreground mt-0.5;
+  }
+
+  .dashboard-card {
+    @apply rounded-[10px] border border-border bg-card;
+  }
+
+  .dashboard-card-title {
+    @apply text-xs font-medium text-foreground;
+  }
+
+  .dashboard-empty {
+    @apply flex items-center justify-center text-xs text-muted-foreground min-h-[160px];
+  }
+
+  .dashboard-skeleton {
+    @apply animate-pulse rounded-[10px] bg-muted;
+  }
+
+  .section-card {
+    @apply dashboard-card p-3.5;
+  }
+
+  .section-card-title {
+    @apply text-xs font-medium text-foreground;
+  }
+
+  .ui-label {
+    @apply text-[11px] font-medium text-muted-foreground;
+  }
+
+  .ui-help {
+    @apply text-[10.5px] text-muted-foreground;
+  }
+
+  .ui-error {
+    @apply text-[11px] text-loss;
+  }
+
+  .ui-input {
+    @apply w-full h-9 px-3 rounded-md border border-input bg-background text-[13px];
+    @apply focus:outline-none focus:ring-2 focus:ring-ring/35 focus:border-ring;
+    @apply placeholder:text-muted-foreground/80;
+  }
+
+  .ui-input-mono {
+    @apply ui-input font-mono;
+  }
+
+  .ui-select {
+    @apply ui-input pr-8 appearance-none;
+  }
+
+  .ui-textarea {
+    @apply w-full px-3 py-2 rounded-md border border-input bg-background text-[13px];
+    @apply focus:outline-none focus:ring-2 focus:ring-ring/35 focus:border-ring;
+    @apply placeholder:text-muted-foreground/80;
+  }
+
+  .ui-btn {
+    @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-md text-xs font-medium transition-colors;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .ui-btn-primary {
+    @apply ui-btn bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+
+  .ui-btn-secondary {
+    @apply ui-btn border border-input bg-background text-foreground hover:bg-accent;
+  }
+
+  .ui-btn-ghost {
+    @apply ui-btn bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent;
+  }
+
+  .ui-btn-danger {
+    @apply ui-btn border border-loss/30 text-loss hover:bg-loss/5;
+  }
+
+  .ui-badge-buy {
+    @apply text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#EAF3DE] text-[#27500A];
+  }
+
+  .ui-badge-sell {
+    @apply text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#FCEBEB] text-[#791F1F];
+  }
+
+  .ui-badge-muted {
+    @apply text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground;
   }
 }
 
