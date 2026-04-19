@@ -58,72 +58,72 @@ export default function EditTradePage({ params }: { params: Promise<{ id: string
     router.push(`/trades/${id}`);
   };
 
-  if (isLoading) return <div className="p-6"><div className="h-40 bg-muted animate-pulse rounded-xl" /></div>;
-  if (!trade) return <div className="p-6 text-muted-foreground">Trade not found.</div>;
+  if (isLoading) return <div className="app-page-narrow max-w-xl"><div className="h-40 bg-muted animate-pulse rounded-[10px]" /></div>;
+  if (!trade) return <div className="app-page-narrow text-xs text-muted-foreground">Trade not found.</div>;
 
   return (
-    <div className="p-6 max-w-lg animate-fade-in">
+    <div className="app-page-narrow max-w-xl">
       <Link href={`/trades/${id}`}
-        className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors">
-        <ArrowLeft className="w-4 h-4" /> Back to trade
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+        <ArrowLeft className="w-3.5 h-3.5" /> Back to trade
       </Link>
 
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">Edit trade</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
+      <div>
+        <h1 className="app-title">Edit trade</h1>
+        <p className="app-subtitle">
           <span className="font-mono font-medium">{trade.symbol}</span> {trade.direction} · {Number(trade.lotSize).toFixed(2)} lots
         </p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-6">
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+      <div className="section-card">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Exit price</label>
+              <label className="ui-label">Exit price</label>
               <input {...register('exitPrice')} type="number" step="0.00001"
-                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+                className="ui-input-mono" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Close time</label>
+              <label className="ui-label">Close time</label>
               <input {...register('closeTime')} type="datetime-local"
-                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                className="ui-input" />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Stop loss</label>
+              <label className="ui-label">Stop loss</label>
               <input {...register('stopLoss')} type="number" step="0.00001"
-                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+                className="ui-input-mono" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Take profit</label>
+              <label className="ui-label">Take profit</label>
               <input {...register('takeProfit')} type="number" step="0.00001"
-                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+                className="ui-input-mono" />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Commission</label>
+              <label className="ui-label">Commission</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
                 <input {...register('commission')} type="number" step="0.01"
-                  className="w-full h-10 pl-7 pr-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+                  className="ui-input-mono pl-7" />
               </div>
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Swap</label>
+              <label className="ui-label">Swap</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
                 <input {...register('swap')} type="number" step="0.01"
-                  className="w-full h-10 pl-7 pr-3 rounded-lg border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring" />
+                  className="ui-input-mono pl-7" />
               </div>
             </div>
           </div>
 
           {pnlPreview !== null && (
-            <div className="p-3 rounded-lg bg-muted/50 border border-border text-sm">
+            <div className="p-2.5 rounded-md bg-muted/45 border border-border text-xs">
               Estimated P&L:{' '}
               <span className={cn('font-semibold tabular-nums', pnlPreview >= 0 ? 'text-profit' : 'text-loss')}>
                 {pnlPreview >= 0 ? '+' : ''}{formatCurrency(pnlPreview)}
@@ -132,16 +132,16 @@ export default function EditTradePage({ params }: { params: Promise<{ id: string
           )}
 
           {updateTrade.isError && (
-            <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg">Failed to update trade.</p>
+            <p className="text-xs text-loss bg-loss/10 p-2.5 rounded-md">Failed to update trade.</p>
           )}
 
           <div className="flex gap-3 pt-1">
             <button type="submit" disabled={isSubmitting || updateTrade.isPending}
-              className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              className="ui-btn-primary flex-1">
               {isSubmitting || updateTrade.isPending ? 'Saving…' : 'Save changes'}
             </button>
             <button type="button" onClick={() => router.back()}
-              className="h-10 px-4 rounded-lg border border-input text-sm hover:bg-accent transition-colors">
+              className="ui-btn-secondary">
               Cancel
             </button>
           </div>

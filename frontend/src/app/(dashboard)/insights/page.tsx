@@ -14,53 +14,55 @@ export default function InsightsPage() {
   const { data: insights, isLoading } = useInsights();
 
   return (
-    <div className="p-6 space-y-5 animate-fade-in">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-          <Brain className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold">AI Insights</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Pattern analysis based on your trading history</p>
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Brain className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <h1 className="app-title">AI Insights</h1>
+            <p className="app-subtitle">Pattern analysis based on your trading history</p>
+          </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4 flex items-start gap-3">
+      <div className="section-card flex items-start gap-2.5">
         <Lightbulb className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-        <p className="text-sm text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Insights are generated from rule-based analysis of your closed trades, emotions, hold times, and symbols.
           The more trades you log with notes and emotions, the more accurate these become.
         </p>
       </div>
 
       {isLoading && (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-xl bg-muted animate-pulse" />
+            <div key={i} className="h-20 rounded-[10px] bg-muted animate-pulse" />
           ))}
         </div>
       )}
 
       {insights && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {insights.map((insight: any) => {
             const cfg = SEVERITY_CONFIG[insight.severity as keyof typeof SEVERITY_CONFIG];
             const Icon = cfg.icon;
             return (
               <div key={insight.id}
-                className={cn('rounded-xl border p-4 flex gap-4', cfg.bg, cfg.border)}>
-                <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5',
+                className={cn('rounded-[10px] border p-3.5 flex gap-3', cfg.bg, cfg.border)}>
+                <div className={cn('w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5',
                   insight.severity === 'danger'  ? 'bg-red-100 dark:bg-red-900/40' :
                   insight.severity === 'warning' ? 'bg-amber-100 dark:bg-amber-900/40' :
                   insight.severity === 'success' ? 'bg-green-100 dark:bg-green-900/40' :
                   'bg-blue-100 dark:bg-blue-900/40')}>
-                  <Icon className={cn('w-4 h-4', cfg.text)} />
+                  <Icon className={cn('w-3.5 h-3.5', cfg.text)} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-4">
-                    <p className={cn('text-sm font-semibold', cfg.text)}>{insight.title}</p>
+                    <p className={cn('text-xs font-medium', cfg.text)}>{insight.title}</p>
                     {insight.metric && (
-                      <span className={cn('text-xs font-medium px-2 py-0.5 rounded shrink-0',
+                      <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0',
                         insight.severity === 'danger'  ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300' :
                         insight.severity === 'warning' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300' :
                         insight.severity === 'success' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
@@ -69,7 +71,7 @@ export default function InsightsPage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{insight.description}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{insight.description}</p>
                 </div>
               </div>
             );
@@ -78,10 +80,10 @@ export default function InsightsPage() {
       )}
 
       {!isLoading && !insights?.length && (
-        <div className="rounded-xl border border-border bg-card p-12 text-center">
+        <div className="section-card min-h-[160px] text-center flex flex-col items-center justify-center">
           <TrendingUp className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-          <p className="text-sm font-medium">No insights yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Log at least 5 closed trades to generate insights.</p>
+          <p className="text-xs font-medium">No insights yet</p>
+          <p className="text-[11px] text-muted-foreground mt-1">Log at least 5 closed trades to generate insights.</p>
         </div>
       )}
     </div>
