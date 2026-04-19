@@ -9,13 +9,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { TradeDirection, TradeStatus } from '@prisma/client';
+import { TradeDirection, TradeSource, TradeStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 // ── DTOs ─────────────────────────────────────────────────────
 import {
   IsString, IsEnum, IsNumber, IsOptional, IsDateString,
-  IsPositive, Min, Max,
+  IsPositive, Min, Max, IsIn,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -45,6 +45,8 @@ export class UpdateTradeDto {
 
 export class SyncTradeDto {
   @ApiProperty() @IsString() ticket: string;       // MT4/MT5 ticket = idempotency key
+  @ApiProperty({ enum: ['MT4', 'MT5'], required: false })
+  @IsOptional() @IsIn(['MT4', 'MT5']) source?: TradeSource;
   @ApiProperty() @IsString() symbol: string;
   @ApiProperty() @IsEnum(TradeDirection) direction: TradeDirection;
   @ApiProperty() @IsNumber() @IsPositive() lotSize: number;
@@ -82,6 +84,8 @@ export class TradesService {
 
     const computed = this.computeMetrics(dto);
 
+    const isClosed = this.isClosedTrade(dto.exitPrice, dto.closeTime);
+
     return this.prisma.trade.create({
       data: {
         accountId: dto.accountId,
@@ -98,7 +102,7 @@ export class TradesService {
         swap: new Decimal(dto.swap ?? 0),
         pnl: computed.pnl,
         riskReward: computed.riskReward,
-        status: dto.exitPrice != null ? TradeStatus.CLOSED : TradeStatus.OPEN,
+        status: isClosed ? TradeStatus.CLOSED : TradeStatus.OPEN,
         source: 'MANUAL',
       },
       include: { notes: true, tradeTags: { include: { tag: true } } },
@@ -169,6 +173,10 @@ export class TradesService {
     const merged = { ...trade, ...dto };
     const computed = this.computeMetrics(merged as any);
 
+    const nextExitPrice = dto.exitPrice !== undefined ? dto.exitPrice : this.toNumberOrNull(trade.exitPrice);
+    const nextCloseTime = dto.closeTime !== undefined ? dto.closeTime : trade.closeTime;
+    const isClosed = this.isClosedTrade(nextExitPrice, nextCloseTime);
+
     return this.prisma.trade.update({
       where: { id: tradeId },
       data: {
@@ -180,7 +188,7 @@ export class TradesService {
         swap: dto.swap != null ? new Decimal(dto.swap) : undefined,
         pnl: computed.pnl,
         riskReward: computed.riskReward,
-        status: dto.exitPrice != null ? TradeStatus.CLOSED : undefined,
+        status: isClosed ? TradeStatus.CLOSED : TradeStatus.OPEN,
       },
       include: { notes: true, tradeTags: { include: { tag: true } } },
     });
@@ -194,10 +202,17 @@ export class TradesService {
 
   // ── MT4/MT5 Sync — idempotent upsert ─────────────────────
   async syncFromEA(accountId: string, dto: SyncTradeDto) {
+    const isClosed = this.isClosedTrade(dto.exitPrice, dto.closeTime);
+    const source = dto.source ?? TradeSource.MT5;
     const computed = this.computeMetrics(dto as any);
 
     const trade = await this.prisma.trade.upsert({
-      where: { externalTicket: dto.ticket },
+      where: {
+        accountId_externalTicket: {
+          accountId,
+          externalTicket: dto.ticket,
+        },
+      },
       create: {
         accountId,
         externalTicket: dto.ticket,
@@ -214,17 +229,25 @@ export class TradesService {
         swap: new Decimal(dto.swap ?? 0),
         pnl: computed.pnl,
         riskReward: computed.riskReward,
-        status: dto.exitPrice != null ? TradeStatus.CLOSED : TradeStatus.OPEN,
-        source: 'MT4',
+        status: isClosed ? TradeStatus.CLOSED : TradeStatus.OPEN,
+        source,
       },
       update: {
+        symbol: dto.symbol.toUpperCase(),
+        direction: dto.direction,
+        lotSize: new Decimal(dto.lotSize),
+        entryPrice: new Decimal(dto.entryPrice),
+        stopLoss: dto.stopLoss != null ? new Decimal(dto.stopLoss) : undefined,
+        takeProfit: dto.takeProfit != null ? new Decimal(dto.takeProfit) : undefined,
+        openTime: new Date(dto.openTime),
         exitPrice: dto.exitPrice != null ? new Decimal(dto.exitPrice) : undefined,
         closeTime: dto.closeTime ? new Date(dto.closeTime) : undefined,
         commission: dto.commission != null ? new Decimal(dto.commission) : undefined,
         swap: dto.swap != null ? new Decimal(dto.swap) : undefined,
         pnl: computed.pnl,
         riskReward: computed.riskReward,
-        status: dto.exitPrice != null ? TradeStatus.CLOSED : TradeStatus.OPEN,
+        status: isClosed ? TradeStatus.CLOSED : TradeStatus.OPEN,
+        source,
       },
     });
 
@@ -262,6 +285,15 @@ export class TradesService {
     }
 
     return { pnl, riskReward };
+  }
+
+  private isClosedTrade(exitPrice?: number | null, closeTime?: string | Date | null) {
+    return exitPrice != null || closeTime != null;
+  }
+
+  private toNumberOrNull(value: Decimal | null | undefined) {
+    if (value == null) return null;
+    return Number(value);
   }
 
   private async assertAccountOwner(userId: string, accountId: string) {
