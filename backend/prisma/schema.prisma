@@ -1,0 +1,202 @@
+// ============================================================
+// TradeJournal — Prisma Schema
+// PostgreSQL · Normalized · Production-ready
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String?
+  avatarUrl    String?   @map("avatar_url")
+  timezone     String    @default("UTC")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  accounts     Account[]
+  sessions     Session[]
+  tags         Tag[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+// SESSIONS (refresh token store)
+// ─────────────────────────────────────────
+model Session {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  refreshToken String   @unique @map("refresh_token")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  userAgent    String?  @map("user_agent")
+  ipAddress    String?  @map("ip_address")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// ─────────────────────────────────────────
+// ACCOUNTS (broker accounts)
+// ─────────────────────────────────────────
+model Account {
+  id           String      @id @default(cuid())
+  userId       String      @map("user_id")
+  name         String
+  broker       String
+  accountNumber String?    @map("account_number")
+  currency     String      @default("USD")
+  initialBalance Decimal   @default(0) @map("initial_balance") @db.Decimal(18, 2)
+  isActive     Boolean     @default(true) @map("is_active")
+  apiKey       String?     @map("api_key")  // for MT4/MT5 EA auth
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades       Trade[]
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+// ─────────────────────────────────────────
+// TRADES
+// ─────────────────────────────────────────
+model Trade {
+  id             String       @id @default(cuid())
+  accountId      String       @map("account_id")
+
+  // Identity — used for idempotency on MT4/MT5 sync
+  externalTicket String?      @unique @map("external_ticket")
+
+  // Instrument
+  symbol         String
+  direction      TradeDirection
+
+  // Sizing
+  lotSize        Decimal      @map("lot_size") @db.Decimal(18, 4)
+
+  // Prices
+  entryPrice     Decimal      @map("entry_price") @db.Decimal(18, 5)
+  exitPrice      Decimal?     @map("exit_price") @db.Decimal(18, 5)
+  stopLoss       Decimal?     @map("stop_loss") @db.Decimal(18, 5)
+  takeProfit     Decimal?     @map("take_profit") @db.Decimal(18, 5)
+
+  // Timing
+  openTime       DateTime     @map("open_time")
+  closeTime      DateTime?    @map("close_time")
+
+  // Computed on write (denormalised for query performance)
+  pnl            Decimal?     @db.Decimal(18, 2)
+  commission     Decimal      @default(0) @db.Decimal(18, 2)
+  swap           Decimal      @default(0) @db.Decimal(18, 2)
+  riskReward     Decimal?     @map("risk_reward") @db.Decimal(10, 4)
+  pips           Decimal?     @db.Decimal(10, 1)
+
+  status         TradeStatus  @default(OPEN)
+  source         TradeSource  @default(MANUAL)
+
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  account        Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  notes          TradeNote[]
+  tradeTags      TradeTag[]
+
+  @@index([accountId])
+  @@index([openTime])
+  @@index([symbol])
+  @@index([status])
+  @@map("trades")
+}
+
+enum TradeDirection {
+  BUY
+  SELL
+}
+
+enum TradeStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum TradeSource {
+  MANUAL
+  MT4
+  MT5
+  API
+}
+
+// ─────────────────────────────────────────
+// TRADE NOTES
+// ─────────────────────────────────────────
+model TradeNote {
+  id        String    @id @default(cuid())
+  tradeId   String    @map("trade_id")
+  content   String    @db.Text
+  emotion   Emotion?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  trade     Trade     @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@index([tradeId])
+  @@map("trade_notes")
+}
+
+enum Emotion {
+  CONFIDENT
+  FEARFUL
+  GREEDY
+  NEUTRAL
+  FOMO
+  DISCIPLINED
+  REVENGE
+  ANXIOUS
+}
+
+// ─────────────────────────────────────────
+// TAGS
+// ─────────────────────────────────────────
+model Tag {
+  id        String     @id @default(cuid())
+  userId    String     @map("user_id")
+  name      String
+  color     String     @default("#6366f1")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeTags TradeTag[]
+
+  @@unique([userId, name])
+  @@map("tags")
+}
+
+// ─────────────────────────────────────────
+// TRADE_TAGS (junction)
+// ─────────────────────────────────────────
+model TradeTag {
+  tradeId   String @map("trade_id")
+  tagId     String @map("tag_id")
+
+  trade     Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  tag       Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([tradeId, tagId])
+  @@map("trade_tags")
+}
