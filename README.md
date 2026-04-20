@@ -164,12 +164,14 @@ Content-Type: application/json
   "takeProfit": 1.09100,
   "openTime": "2024-01-15T09:30:00Z",
   "closeTime": "2024-01-15T14:22:00Z",
+  "pnl": 127.45,
   "commission": 3.50,
   "swap": -0.20
 }
 ```
 
 The `ticket` field is the idempotency key — safe to resend, will upsert not duplicate.
+For MT5/EA sync, send realized `pnl` on close payloads when available (preferred over backend approximation for non-FX symbols).
 
 ### MQL5 EA Template
 
@@ -177,40 +179,24 @@ The `ticket` field is the idempotency key — safe to resend, will upsert not du
 string API_URL   = "http://your-server:4000/api/trades/sync";
 string API_KEY   = "your-api-key-here";
 
-void SyncTrade(ulong ticket) {
-   HistoryDealSelect(ticket);
-   
-   string body = StringFormat(
-      "{\"ticket\":\"%d\","
-      "\"symbol\":\"%s\","
-      "\"direction\":\"%s\","
-      "\"lotSize\":%.2f,"
-      "\"entryPrice\":%.5f,"
-      "\"exitPrice\":%.5f,"
-      "\"openTime\":\"%s\","
-      "\"closeTime\":\"%s\","
-      "\"commission\":%.2f,"
-      "\"swap\":%.2f}",
-      ticket,
-      HistoryDealGetString(ticket, DEAL_SYMBOL),
-      HistoryDealGetInteger(ticket, DEAL_TYPE) == DEAL_TYPE_BUY ? "BUY" : "SELL",
-      HistoryDealGetDouble(ticket, DEAL_VOLUME),
-      HistoryDealGetDouble(ticket, DEAL_PRICE),
-      HistoryDealGetDouble(ticket, DEAL_PRICE),
-      TimeToString(HistoryDealGetInteger(ticket, DEAL_TIME)),
-      TimeToString(TimeCurrent()),
-      HistoryDealGetDouble(ticket, DEAL_COMMISSION),
-      HistoryDealGetDouble(ticket, DEAL_SWAP)
-   );
-   
-   char post_data[];
-   StringToCharArray(body, post_data, 0, StringLen(body));
-   
-   string headers = "Content-Type: application/json\r\nX-Api-Key: " + API_KEY;
-   char result[];
-   string result_headers;
-   
-   int res = WebRequest("POST", API_URL, headers, 5000, post_data, result, result_headers);
+// OPEN payload:
+// - include ticket/symbol/direction/lotSize/entryPrice/openTime
+// - omit closeTime/exitPrice when trade is still open
+//
+// CLOSED payload:
+// - include same ticket + exitPrice + closeTime
+// - ensure closeTime is valid ISO 8601
+//
+// Full robust implementation is in:
+// mt5/TradeJournalSyncEA.mq5
+
+void SendTradePayload(string body) {
+  char post_data[];
+  StringToCharArray(body, post_data, 0, StringLen(body));
+  string headers = "Content-Type: application/json\r\nX-Api-Key: " + API_KEY;
+  char result[];
+  string result_headers;
+  int res = WebRequest("POST", API_URL, headers, 5000, post_data, result, result_headers);
 }
 ```
 
