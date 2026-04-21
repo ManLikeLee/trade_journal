@@ -129,23 +129,33 @@ __decorate([
     __metadata("design:type", String)
 ], SyncTradeDto.prototype, "ticket", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)(),
+    (0, swagger_1.ApiProperty)({ enum: ['MT4', 'MT5'], required: false }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsIn)(['MT4', 'MT5']),
+    __metadata("design:type", String)
+], SyncTradeDto.prototype, "source", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false }),
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], SyncTradeDto.prototype, "symbol", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)(),
+    (0, swagger_1.ApiProperty)({ enum: ['BUY', 'SELL'], required: false }),
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsEnum)(client_1.TradeDirection),
     __metadata("design:type", String)
 ], SyncTradeDto.prototype, "direction", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)(),
+    (0, swagger_1.ApiProperty)({ required: false }),
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsNumber)(),
     (0, class_validator_1.IsPositive)(),
     __metadata("design:type", Number)
 ], SyncTradeDto.prototype, "lotSize", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)(),
+    (0, swagger_1.ApiProperty)({ required: false }),
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsNumber)(),
     __metadata("design:type", Number)
 ], SyncTradeDto.prototype, "entryPrice", void 0);
@@ -168,14 +178,15 @@ __decorate([
     __metadata("design:type", Number)
 ], SyncTradeDto.prototype, "takeProfit", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)(),
-    (0, class_validator_1.IsDateString)(),
+    (0, swagger_1.ApiProperty)({ required: false }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], SyncTradeDto.prototype, "openTime", void 0);
 __decorate([
     (0, swagger_1.ApiProperty)({ required: false }),
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsDateString)(),
+    (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], SyncTradeDto.prototype, "closeTime", void 0);
 __decorate([
@@ -190,6 +201,12 @@ __decorate([
     (0, class_validator_1.IsNumber)(),
     __metadata("design:type", Number)
 ], SyncTradeDto.prototype, "swap", void 0);
+__decorate([
+    (0, swagger_1.ApiProperty)({ required: false }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsNumber)(),
+    __metadata("design:type", Number)
+], SyncTradeDto.prototype, "pnl", void 0);
 class TradesQueryDto {
     constructor() {
         this.page = 1;
@@ -259,6 +276,7 @@ let TradesService = class TradesService {
     async create(userId, dto) {
         await this.assertAccountOwner(userId, dto.accountId);
         const computed = this.computeMetrics(dto);
+        const isClosed = this.isClosedTrade(dto.exitPrice, dto.closeTime);
         return this.prisma.trade.create({
             data: {
                 accountId: dto.accountId,
@@ -275,7 +293,7 @@ let TradesService = class TradesService {
                 swap: new library_1.Decimal(dto.swap ?? 0),
                 pnl: computed.pnl,
                 riskReward: computed.riskReward,
-                status: dto.exitPrice != null ? client_1.TradeStatus.CLOSED : client_1.TradeStatus.OPEN,
+                status: isClosed ? client_1.TradeStatus.CLOSED : client_1.TradeStatus.OPEN,
                 source: 'MANUAL',
             },
             include: { notes: true, tradeTags: { include: { tag: true } } },
@@ -339,6 +357,9 @@ let TradesService = class TradesService {
         const trade = await this.findOne(userId, tradeId);
         const merged = { ...trade, ...dto };
         const computed = this.computeMetrics(merged);
+        const nextExitPrice = dto.exitPrice !== undefined ? dto.exitPrice : this.toNumberOrNull(trade.exitPrice);
+        const nextCloseTime = dto.closeTime !== undefined ? dto.closeTime : trade.closeTime;
+        const isClosed = this.isClosedTrade(nextExitPrice, nextCloseTime);
         return this.prisma.trade.update({
             where: { id: tradeId },
             data: {
@@ -350,7 +371,7 @@ let TradesService = class TradesService {
                 swap: dto.swap != null ? new library_1.Decimal(dto.swap) : undefined,
                 pnl: computed.pnl,
                 riskReward: computed.riskReward,
-                status: dto.exitPrice != null ? client_1.TradeStatus.CLOSED : undefined,
+                status: isClosed ? client_1.TradeStatus.CLOSED : client_1.TradeStatus.OPEN,
             },
             include: { notes: true, tradeTags: { include: { tag: true } } },
         });
@@ -360,39 +381,105 @@ let TradesService = class TradesService {
         await this.prisma.trade.delete({ where: { id: tradeId } });
     }
     async syncFromEA(accountId, dto) {
-        const computed = this.computeMetrics(dto);
-        const trade = await this.prisma.trade.upsert({
-            where: { externalTicket: dto.ticket },
-            create: {
-                accountId,
-                externalTicket: dto.ticket,
-                symbol: dto.symbol.toUpperCase(),
+        const existing = await this.prisma.trade.findFirst({
+            where: { accountId, externalTicket: dto.ticket },
+        });
+        if (!existing) {
+            if (!dto.symbol || !dto.direction || dto.lotSize == null || dto.entryPrice == null || !dto.openTime) {
+                throw new common_1.BadRequestException('New sync trades require symbol, direction, lotSize, entryPrice, and openTime');
+            }
+            const source = dto.source ?? client_1.TradeSource.MT5;
+            const closeTime = this.parseOptionalTradeDate(dto.closeTime);
+            const isClosed = this.isClosedTrade(dto.exitPrice, closeTime);
+            const computed = this.computeMetrics({
                 direction: dto.direction,
-                lotSize: new library_1.Decimal(dto.lotSize),
-                entryPrice: new library_1.Decimal(dto.entryPrice),
-                exitPrice: dto.exitPrice != null ? new library_1.Decimal(dto.exitPrice) : null,
-                stopLoss: dto.stopLoss != null ? new library_1.Decimal(dto.stopLoss) : null,
-                takeProfit: dto.takeProfit != null ? new library_1.Decimal(dto.takeProfit) : null,
-                openTime: new Date(dto.openTime),
-                closeTime: dto.closeTime ? new Date(dto.closeTime) : null,
-                commission: new library_1.Decimal(dto.commission ?? 0),
-                swap: new library_1.Decimal(dto.swap ?? 0),
-                pnl: computed.pnl,
-                riskReward: computed.riskReward,
-                status: dto.exitPrice != null ? client_1.TradeStatus.CLOSED : client_1.TradeStatus.OPEN,
-                source: 'MT4',
-            },
-            update: {
+                entryPrice: dto.entryPrice,
+                exitPrice: dto.exitPrice,
+                stopLoss: dto.stopLoss,
+                takeProfit: dto.takeProfit,
+                lotSize: dto.lotSize,
+                commission: dto.commission ?? 0,
+                swap: dto.swap ?? 0,
+            });
+            const pnl = this.resolveSyncedPnl({
+                symbol: dto.symbol,
+                payloadPnl: dto.pnl,
+                computedPnl: computed.pnl,
+            });
+            const trade = await this.prisma.trade.create({
+                data: {
+                    accountId,
+                    externalTicket: dto.ticket,
+                    symbol: dto.symbol.toUpperCase(),
+                    direction: dto.direction,
+                    lotSize: new library_1.Decimal(dto.lotSize),
+                    entryPrice: new library_1.Decimal(dto.entryPrice),
+                    exitPrice: dto.exitPrice != null ? new library_1.Decimal(dto.exitPrice) : null,
+                    stopLoss: dto.stopLoss != null ? new library_1.Decimal(dto.stopLoss) : null,
+                    takeProfit: dto.takeProfit != null ? new library_1.Decimal(dto.takeProfit) : null,
+                    openTime: this.parseTradeDate(dto.openTime, 'openTime'),
+                    closeTime,
+                    commission: new library_1.Decimal(dto.commission ?? 0),
+                    swap: new library_1.Decimal(dto.swap ?? 0),
+                    pnl,
+                    riskReward: computed.riskReward,
+                    status: isClosed ? client_1.TradeStatus.CLOSED : client_1.TradeStatus.OPEN,
+                    source,
+                },
+            });
+            return { trade, created: true };
+        }
+        const mergedDirection = dto.direction ?? existing.direction;
+        const mergedEntryPrice = dto.entryPrice ?? Number(existing.entryPrice);
+        const mergedLotSize = dto.lotSize ?? Number(existing.lotSize);
+        const mergedExitPrice = dto.exitPrice !== undefined ? dto.exitPrice : this.toNumberOrNull(existing.exitPrice);
+        const mergedStopLoss = dto.stopLoss !== undefined ? dto.stopLoss : this.toNumberOrNull(existing.stopLoss);
+        const mergedTakeProfit = dto.takeProfit !== undefined ? dto.takeProfit : this.toNumberOrNull(existing.takeProfit);
+        const mergedCommission = dto.commission !== undefined ? dto.commission : Number(existing.commission);
+        const mergedSwap = dto.swap !== undefined ? dto.swap : Number(existing.swap);
+        const mergedCloseTime = dto.closeTime != null
+            ? this.parseOptionalTradeDate(dto.closeTime)
+            : existing.closeTime;
+        const isClosed = this.isClosedTrade(mergedExitPrice, mergedCloseTime);
+        const source = dto.source ?? existing.source;
+        const mergedSymbol = dto.symbol ?? existing.symbol;
+        const computed = this.computeMetrics({
+            direction: mergedDirection,
+            entryPrice: mergedEntryPrice,
+            exitPrice: mergedExitPrice,
+            stopLoss: mergedStopLoss,
+            takeProfit: mergedTakeProfit,
+            lotSize: mergedLotSize,
+            commission: mergedCommission,
+            swap: mergedSwap,
+        });
+        const pnl = this.resolveSyncedPnl({
+            symbol: mergedSymbol,
+            payloadPnl: dto.pnl,
+            computedPnl: computed.pnl,
+            existingPnl: existing.pnl,
+        });
+        const trade = await this.prisma.trade.update({
+            where: { id: existing.id },
+            data: {
+                symbol: dto.symbol ? dto.symbol.toUpperCase() : undefined,
+                direction: dto.direction,
+                lotSize: dto.lotSize != null ? new library_1.Decimal(dto.lotSize) : undefined,
+                entryPrice: dto.entryPrice != null ? new library_1.Decimal(dto.entryPrice) : undefined,
                 exitPrice: dto.exitPrice != null ? new library_1.Decimal(dto.exitPrice) : undefined,
-                closeTime: dto.closeTime ? new Date(dto.closeTime) : undefined,
+                stopLoss: dto.stopLoss != null ? new library_1.Decimal(dto.stopLoss) : undefined,
+                takeProfit: dto.takeProfit != null ? new library_1.Decimal(dto.takeProfit) : undefined,
+                openTime: dto.openTime != null ? this.parseTradeDate(dto.openTime, 'openTime') : undefined,
+                closeTime: dto.closeTime != null ? this.parseTradeDate(dto.closeTime, 'closeTime') : undefined,
                 commission: dto.commission != null ? new library_1.Decimal(dto.commission) : undefined,
                 swap: dto.swap != null ? new library_1.Decimal(dto.swap) : undefined,
-                pnl: computed.pnl,
+                pnl,
                 riskReward: computed.riskReward,
-                status: dto.exitPrice != null ? client_1.TradeStatus.CLOSED : client_1.TradeStatus.OPEN,
+                status: isClosed ? client_1.TradeStatus.CLOSED : client_1.TradeStatus.OPEN,
+                source,
             },
         });
-        return { trade, created: !trade.updatedAt || trade.createdAt.getTime() === trade.updatedAt.getTime() };
+        return { trade, created: false };
     }
     computeMetrics(dto) {
         let pnl = null;
@@ -413,6 +500,64 @@ let TradesService = class TradesService {
                 riskReward = new library_1.Decimal((reward / risk).toFixed(4));
         }
         return { pnl, riskReward };
+    }
+    isClosedTrade(exitPrice, closeTime) {
+        return exitPrice != null || closeTime != null;
+    }
+    parseOptionalTradeDate(value) {
+        if (value == null)
+            return null;
+        return this.parseTradeDate(value, 'date');
+    }
+    parseTradeDate(value, fieldName) {
+        const raw = String(value).trim();
+        if (!raw)
+            throw new common_1.BadRequestException(`Invalid ${fieldName}: empty value`);
+        const mtLike = raw.match(/^(\d{4})\.(\d{2})\.(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+        if (mtLike) {
+            const [, y, m, d, h, mi, s] = mtLike;
+            const normalized = `${y}-${m}-${d}T${h}:${mi}:${s ?? '00'}Z`;
+            const parsed = new Date(normalized);
+            if (!Number.isNaN(parsed.getTime()))
+                return parsed;
+        }
+        const direct = new Date(raw);
+        if (!Number.isNaN(direct.getTime()))
+            return direct;
+        if (/^\d{10,13}$/.test(raw)) {
+            const num = Number(raw);
+            const ms = raw.length === 13 ? num : num * 1000;
+            const parsed = new Date(ms);
+            if (!Number.isNaN(parsed.getTime()))
+                return parsed;
+        }
+        throw new common_1.BadRequestException(`Invalid ${fieldName}: ${raw}`);
+    }
+    toNumberOrNull(value) {
+        if (value == null)
+            return null;
+        return Number(value);
+    }
+    resolveSyncedPnl(params) {
+        const { symbol, payloadPnl, computedPnl, existingPnl } = params;
+        if (payloadPnl != null)
+            return new library_1.Decimal(payloadPnl);
+        if (this.isLikelyForexSymbol(symbol))
+            return computedPnl ?? existingPnl ?? null;
+        return existingPnl ?? null;
+    }
+    isLikelyForexSymbol(symbol) {
+        const fiat = new Set([
+            'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD',
+            'NOK', 'SEK', 'DKK', 'ZAR', 'TRY', 'PLN', 'HUF', 'CZK',
+            'MXN', 'SGD', 'HKD', 'CNH',
+        ]);
+        const letters = symbol.toUpperCase().replace(/[^A-Z]/g, '');
+        if (letters.length < 6)
+            return false;
+        const base = letters.slice(0, 3);
+        const quote = letters.slice(3, 6);
+        return fiat.has(base) && fiat.has(quote);
     }
     async assertAccountOwner(userId, accountId) {
         const account = await this.prisma.account.findFirst({

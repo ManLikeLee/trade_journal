@@ -76,11 +76,32 @@ let AccountsService = class AccountsService {
         });
     }
     async create(userId, dto) {
+        const name = dto.name.trim();
+        const broker = dto.broker.trim();
+        const existing = await this.prisma.account.findFirst({
+            where: {
+                userId,
+                name: { equals: name, mode: 'insensitive' },
+            },
+        });
+        if (existing) {
+            return this.prisma.account.update({
+                where: { id: existing.id },
+                data: {
+                    broker,
+                    accountNumber: dto.accountNumber ?? existing.accountNumber,
+                    currency: dto.currency ?? existing.currency,
+                    initialBalance: new library_1.Decimal(dto.initialBalance ?? Number(existing.initialBalance)),
+                    isActive: true,
+                    apiKey: existing.apiKey ?? crypto.randomUUID(),
+                },
+            });
+        }
         return this.prisma.account.create({
             data: {
                 userId,
-                name: dto.name,
-                broker: dto.broker,
+                name,
+                broker,
                 accountNumber: dto.accountNumber,
                 currency: dto.currency ?? 'USD',
                 initialBalance: new library_1.Decimal(dto.initialBalance ?? 0),

@@ -139,7 +139,7 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
                 {trade.direction}
               </span>
               <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium',
-                trade.status === 'OPEN' ? 'bg-[#E6F1FB] text-[#185FA5]' : 'bg-muted text-muted-foreground')}>
+                trade.status === 'OPEN' ? 'ui-badge-info' : 'bg-muted text-muted-foreground')}>
                 {trade.status}
               </span>
             </div>
@@ -177,7 +177,7 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
 
       {/* P&L hero */}
       {hasPnl && (
-        <div className={cn('rounded-[10px] border p-4 grid grid-cols-3 gap-3', pnl >= 0 ? 'bg-[#EAF3DE] border-[#CFE2B5]' : 'bg-[#FCEBEB] border-[#F1C6C6]')}>
+        <div className={cn('p-4 grid grid-cols-3 gap-3', pnl >= 0 ? 'ui-surface-profit' : 'ui-surface-loss')}>
           <div className="text-center">
             <p className="text-[10.5px] font-medium opacity-70 mb-1">Net P&L</p>
             <p className="text-xl font-medium tabular-nums">

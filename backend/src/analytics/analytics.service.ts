@@ -14,26 +14,40 @@ export class AnalyticsService {
 
   async getSummary(userId: string, query: AnalyticsQuery = {}) {
     const trades = await this.getClosedTrades(userId, query);
-    if (trades.length === 0) return this.emptyStats();
+    const normalized = trades.map((t) => this.normalizeTrade(t));
+    const realized = normalized.filter((t) => t.pnl != null);
+    if (realized.length === 0) return this.emptyStats();
 
-    const wins = trades.filter((t) => Number(t.pnl) > 0);
-    const losses = trades.filter((t) => Number(t.pnl) <= 0);
+    const wins = realized.filter((t) => t.pnl! > 0);
+    const losses = realized.filter((t) => t.pnl! < 0);
 
-    const totalPnl = trades.reduce((s, t) => s + Number(t.pnl ?? 0), 0);
-    const grossWin = wins.reduce((s, t) => s + Number(t.pnl ?? 0), 0);
-    const grossLoss = Math.abs(losses.reduce((s, t) => s + Number(t.pnl ?? 0), 0));
-    const winRate = wins.length / trades.length;
+    const totalPnl = realized.reduce((s, t) => s + t.pnl!, 0);
+    const grossWin = wins.reduce((s, t) => s + t.pnl!, 0);
+    const grossLossRaw = losses.reduce((s, t) => s + t.pnl!, 0); // negative
+    const grossLoss = Math.abs(grossLossRaw);
+
+    // Win rate excludes breakeven trades from denominator.
+    const decisiveCount = wins.length + losses.length;
+    const winRate = decisiveCount > 0 ? wins.length / decisiveCount : 0;
+
     const avgWin = wins.length ? grossWin / wins.length : 0;
     const avgLoss = losses.length ? grossLoss / losses.length : 0;
-    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
-    const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
-    const rrValues = trades.filter((t) => t.riskReward != null).map((t) => Number(t.riskReward));
+    const rawProfitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? grossWin : 0;
+    const profitFactor = Number.isFinite(rawProfitFactor) ? rawProfitFactor : 0;
+    const expectancy = decisiveCount > 0 ? (grossWin + grossLossRaw) / decisiveCount : 0;
+
+    const rrValues = normalized
+      .map((t) => this.resolveRiskReward(t))
+      .filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
     const avgRR = rrValues.length ? rrValues.reduce((s, v) => s + v, 0) / rrValues.length : 0;
 
-    const { maxDrawdown, maxDrawdownPct } = this.calcDrawdown(trades);
+    const curveTrades = realized
+      .filter((t) => t.closeTime != null)
+      .sort((a, b) => a.closeTime!.getTime() - b.closeTime!.getTime());
+    const { maxDrawdown, maxDrawdownPct } = this.calcDrawdown(curveTrades.map((t) => t.pnl!));
 
     return {
-      totalTrades: trades.length,
+      totalTrades: realized.length,
       winCount: wins.length,
       lossCount: losses.length,
       winRate: parseFloat((winRate * 100).toFixed(2)),
@@ -52,16 +66,21 @@ export class AnalyticsService {
 
   async getEquityCurve(userId: string, query: AnalyticsQuery = {}) {
     const trades = await this.getClosedTrades(userId, query);
-    const account = await this.getAccountBalance(userId, query.accountId);
-    let running = account?.initialBalance ? Number(account.initialBalance) : 10000;
+    const normalized = trades.map((t) => this.normalizeTrade(t));
+    const curveTrades = normalized
+      .filter((t) => t.pnl != null && t.closeTime != null)
+      .sort((a, b) => a.closeTime!.getTime() - b.closeTime!.getTime());
+
+    // Baseline starts at realized P&L = 0.
+    let running = 0;
     const curve: Array<{ date: string; equity: number; pnl: number }> = [];
 
-    for (const trade of trades) {
-      running += Number(trade.pnl ?? 0);
+    for (const trade of curveTrades) {
+      running += trade.pnl!;
       curve.push({
         date: trade.closeTime!.toISOString(),
         equity: parseFloat(running.toFixed(2)),
-        pnl: parseFloat(Number(trade.pnl ?? 0).toFixed(2)),
+        pnl: parseFloat(trade.pnl!.toFixed(2)),
       });
     }
     return curve;
@@ -69,11 +88,15 @@ export class AnalyticsService {
 
   async getPnlByDay(userId: string, query: AnalyticsQuery = {}) {
     const trades = await this.getClosedTrades(userId, query);
+    const normalized = trades.map((t) => this.normalizeTrade(t));
+    const realized = normalized
+      .filter((t) => t.pnl != null && t.closeTime != null)
+      .sort((a, b) => a.closeTime!.getTime() - b.closeTime!.getTime());
     const map = new Map<string, number>();
 
-    for (const trade of trades) {
+    for (const trade of realized) {
       const day = trade.closeTime!.toISOString().slice(0, 10);
-      map.set(day, (map.get(day) ?? 0) + Number(trade.pnl ?? 0));
+      map.set(day, (map.get(day) ?? 0) + trade.pnl!);
     }
 
     return Array.from(map.entries())
@@ -83,11 +106,13 @@ export class AnalyticsService {
 
   async getPnlBySymbol(userId: string, query: AnalyticsQuery = {}) {
     const trades = await this.getClosedTrades(userId, query);
+    const normalized = trades.map((t) => this.normalizeTrade(t));
+    const realized = normalized.filter((t) => t.pnl != null);
     const map = new Map<string, { pnl: number; count: number }>();
 
-    for (const trade of trades) {
+    for (const trade of realized) {
       const cur = map.get(trade.symbol) ?? { pnl: 0, count: 0 };
-      map.set(trade.symbol, { pnl: cur.pnl + Number(trade.pnl ?? 0), count: cur.count + 1 });
+      map.set(trade.symbol, { pnl: cur.pnl + trade.pnl!, count: cur.count + 1 });
     }
 
     return Array.from(map.entries())
@@ -97,12 +122,14 @@ export class AnalyticsService {
 
   async getWinLossDistribution(userId: string, query: AnalyticsQuery = {}) {
     const trades = await this.getClosedTrades(userId, query);
+    const normalized = trades.map((t) => this.normalizeTrade(t));
+    const realized = normalized.filter((t) => t.pnl != null);
     const buckets: Record<string, number> = {
       '>50': 0, '10-50': 0, '0-10': 0,
       '-10-0': 0, '-50--10': 0, '<-50': 0,
     };
-    for (const trade of trades) {
-      const p = Number(trade.pnl ?? 0);
+    for (const trade of realized) {
+      const p = trade.pnl!;
       if (p > 50) buckets['>50']++;
       else if (p > 10) buckets['10-50']++;
       else if (p >= 0) buckets['0-10']++;
@@ -121,14 +148,17 @@ export class AnalyticsService {
     });
     const accountIds = userAccounts.map((a) => a.id);
 
+    const from = this.dateOrNull(query.from);
+    const to = this.dateOrNull(query.to);
+
     return this.prisma.trade.findMany({
       where: {
         accountId: { in: accountIds },
         status: TradeStatus.CLOSED,
-        ...(query.from || query.to ? {
+        ...(from || to ? {
           closeTime: {
-            ...(query.from && { gte: new Date(query.from) }),
-            ...(query.to && { lte: new Date(query.to) }),
+            ...(from && { gte: from }),
+            ...(to && { lte: to }),
           },
         } : {}),
       },
@@ -136,18 +166,57 @@ export class AnalyticsService {
     });
   }
 
-  private async getAccountBalance(userId: string, accountId?: string) {
-    return this.prisma.account.findFirst({
-      where: { userId, ...(accountId && { id: accountId }) },
-    });
+  private normalizeTrade(trade: any) {
+    return {
+      symbol: String(trade.symbol ?? '').toUpperCase(),
+      direction: trade.direction as TradeDirection,
+      entryPrice: this.numOrNull(trade.entryPrice),
+      exitPrice: this.numOrNull(trade.exitPrice),
+      stopLoss: this.numOrNull(trade.stopLoss),
+      takeProfit: this.numOrNull(trade.takeProfit),
+      riskReward: this.numOrNull(trade.riskReward),
+      pnl: this.numOrNull(trade.pnl),
+      closeTime: this.dateOrNull(trade.closeTime),
+    };
   }
 
-  private calcDrawdown(trades: Array<{ pnl: any }>) {
-    let peak = 0, trough = 0, equity = 0;
-    let maxDrawdown = 0, maxDrawdownPct = 0;
+  private resolveRiskReward(trade: {
+    riskReward: number | null;
+    direction: TradeDirection;
+    entryPrice: number | null;
+    stopLoss: number | null;
+    exitPrice: number | null;
+    takeProfit: number | null;
+  }) {
+    if (trade.riskReward != null && Number.isFinite(trade.riskReward) && trade.riskReward > 0) {
+      return trade.riskReward;
+    }
 
-    for (const trade of trades) {
-      equity += Number(trade.pnl ?? 0);
+    if (trade.entryPrice == null || trade.stopLoss == null) return null;
+    const rewardTarget = trade.exitPrice ?? trade.takeProfit;
+    if (rewardTarget == null) return null;
+
+    const risk = trade.direction === TradeDirection.BUY
+      ? trade.entryPrice - trade.stopLoss
+      : trade.stopLoss - trade.entryPrice;
+    const reward = trade.direction === TradeDirection.BUY
+      ? rewardTarget - trade.entryPrice
+      : trade.entryPrice - rewardTarget;
+
+    if (!Number.isFinite(risk) || !Number.isFinite(reward) || risk <= 0) return null;
+    const rr = reward / risk;
+    if (!Number.isFinite(rr) || rr <= 0) return null;
+    return rr;
+  }
+
+  private calcDrawdown(pnls: number[]) {
+    let peak = 0;
+    let equity = 0;
+    let maxDrawdown = 0;
+    let maxDrawdownPct = 0;
+
+    for (const pnl of pnls) {
+      equity += pnl;
       if (equity > peak) peak = equity;
       const dd = peak - equity;
       const ddPct = peak > 0 ? (dd / peak) * 100 : 0;
@@ -163,5 +232,17 @@ export class AnalyticsService {
       avgWin: 0, avgLoss: 0, profitFactor: 0, expectancy: 0,
       avgRR: 0, maxDrawdown: 0, maxDrawdownPct: 0,
     };
+  }
+
+  private numOrNull(value: unknown) {
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  private dateOrNull(value: unknown) {
+    if (value == null) return null;
+    const d = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(d.getTime()) ? null : d;
   }
 }

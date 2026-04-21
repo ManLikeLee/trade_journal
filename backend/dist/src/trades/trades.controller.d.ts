@@ -106,13 +106,13 @@ export declare class TradesController {
             name: string;
             createdAt: Date;
             updatedAt: Date;
+            userId: string;
             broker: string;
             accountNumber: string | null;
             currency: string;
             initialBalance: import("@prisma/client/runtime/library").Decimal;
             isActive: boolean;
             apiKey: string | null;
-            userId: string;
         };
         tradeTags: ({
             tag: {

@@ -1,20 +1,9 @@
 {
   "pages": {
-    "/(auth)/login/page": [
+    "/global-error": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/(auth)/login/page.js"
-    ],
-    "/(auth)/layout": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/(auth)/layout.js"
-    ],
-    "/layout": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/css/css-src_app_globals_css-node_modules_next_font_local_target_css-node_modules_next_font_local_-db6467.css",
-      "static/chunks/app/layout.js"
+      "static/chunks/app/global-error.js"
     ],
     "/(dashboard)/dashboard/page": [
       "static/chunks/webpack.js",
@@ -26,10 +15,16 @@
       "static/chunks/main-app.js",
       "static/chunks/app/(dashboard)/layout.js"
     ],
-    "/(dashboard)/settings/page": [
+    "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/(dashboard)/settings/page.js"
+      "static/css/css-src_app_globals_css-node_modules_next_font_local_target_css-node_modules_next_font_local_-db6467.css",
+      "static/chunks/app/layout.js"
+    ],
+    "/error": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/error.js"
     ],
     "/(dashboard)/trades/page": [
       "static/chunks/webpack.js",

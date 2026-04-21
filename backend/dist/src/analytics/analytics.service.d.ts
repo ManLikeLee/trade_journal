@@ -39,7 +39,10 @@ export declare class AnalyticsService {
     }[]>;
     getWinLossDistribution(userId: string, query?: AnalyticsQuery): Promise<Record<string, number>>;
     private getClosedTrades;
-    private getAccountBalance;
+    private normalizeTrade;
+    private resolveRiskReward;
     private calcDrawdown;
     private emptyStats;
+    private numOrNull;
+    private dateOrNull;
 }

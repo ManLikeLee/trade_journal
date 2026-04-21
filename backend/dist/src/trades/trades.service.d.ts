@@ -1,5 +1,5 @@
 import { PrismaService } from '../prisma/prisma.service';
-import { TradeDirection, TradeStatus } from '@prisma/client';
+import { TradeDirection, TradeSource, TradeStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 export declare class CreateTradeDto {
     accountId: string;
@@ -25,17 +25,19 @@ export declare class UpdateTradeDto {
 }
 export declare class SyncTradeDto {
     ticket: string;
-    symbol: string;
-    direction: TradeDirection;
-    lotSize: number;
-    entryPrice: number;
+    source?: TradeSource;
+    symbol?: string;
+    direction?: TradeDirection;
+    lotSize?: number;
+    entryPrice?: number;
     exitPrice?: number;
     stopLoss?: number;
     takeProfit?: number;
-    openTime: string;
+    openTime?: string;
     closeTime?: string;
     commission?: number;
     swap?: number;
+    pnl?: number;
 }
 export declare class TradesQueryDto {
     accountId?: string;
@@ -154,13 +156,13 @@ export declare class TradesService {
             name: string;
             createdAt: Date;
             updatedAt: Date;
+            userId: string;
             broker: string;
             accountNumber: string | null;
             currency: string;
             initialBalance: Decimal;
             isActive: boolean;
             apiKey: string | null;
-            userId: string;
         };
         tradeTags: ({
             tag: {
@@ -277,5 +279,11 @@ export declare class TradesService {
         created: boolean;
     }>;
     private computeMetrics;
+    private isClosedTrade;
+    private parseOptionalTradeDate;
+    private parseTradeDate;
+    private toNumberOrNull;
+    private resolveSyncedPnl;
+    private isLikelyForexSymbol;
     private assertAccountOwner;
 }

@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { useTheme } from '@/components/theme/theme-provider';
 
 const accountSchema = z.object({
   name:          z.string().min(1, 'Required'),
@@ -51,7 +53,7 @@ function AccountCard({ account }: { account: any }) {
           <p className="text-[11px] text-muted-foreground">{account.broker} · {account.currency}</p>
         </div>
         <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium',
-          account.isActive ? 'bg-[#EAF3DE] text-[#27500A]' : 'bg-muted text-muted-foreground')}>
+          account.isActive ? 'ui-badge-buy' : 'bg-muted text-muted-foreground')}>
           {account.isActive ? 'Active' : 'Inactive'}
         </span>
       </div>
@@ -115,6 +117,7 @@ export default function SettingsPage() {
   const { data: accounts } = useAccounts();
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  const { theme, setTheme } = useTheme();
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm({
     resolver: zodResolver(accountSchema),
@@ -124,6 +127,12 @@ export default function SettingsPage() {
     mutationFn: (data: any) => api.post('/accounts', data).then(r => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['accounts'] }); setShowForm(false); reset(); },
   });
+
+  const createError = createAccount.error as any;
+  const createErrorMessage =
+    createError?.response?.data?.message ||
+    createError?.message ||
+    null;
 
   return (
     <div className="app-page-narrow max-w-3xl">
@@ -193,6 +202,9 @@ export default function SettingsPage() {
                 Cancel
               </button>
             </div>
+            {createErrorMessage && (
+              <p className="ui-error">{String(createErrorMessage)}</p>
+            )}
           </form>
         )}
 
@@ -205,6 +217,31 @@ export default function SettingsPage() {
               No accounts yet. Add one to get started.
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Appearance */}
+      <section className="section-card space-y-2.5">
+        <h2 className="section-card-title">Appearance</h2>
+        <p className="text-xs text-muted-foreground">
+          Choose your preferred app theme. This setting is saved on this browser.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setTheme('light')}
+            className={cn('ui-btn-secondary h-8 px-3', theme === 'light' && 'ui-nav-active border-transparent')}
+          >
+            Light
+          </button>
+          <button
+            type="button"
+            onClick={() => setTheme('dark')}
+            className={cn('ui-btn-secondary h-8 px-3', theme === 'dark' && 'ui-nav-active border-transparent')}
+          >
+            Dark
+          </button>
+          <ThemeToggle compact className="ml-auto" />
         </div>
       </section>
 

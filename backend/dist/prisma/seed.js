@@ -14,35 +14,53 @@ function randomFrom(arr) {
 }
 async function main() {
     console.log('🌱 Seeding database...');
-    await prisma.tradeTag.deleteMany();
-    await prisma.tradeNote.deleteMany();
-    await prisma.trade.deleteMany();
-    await prisma.tag.deleteMany();
-    await prisma.account.deleteMany();
-    await prisma.session.deleteMany();
-    await prisma.user.deleteMany();
+    const reset = process.env.SEED_RESET === 'true';
+    if (reset) {
+        await prisma.tradeTag.deleteMany();
+        await prisma.tradeNote.deleteMany();
+        await prisma.trade.deleteMany();
+        await prisma.tag.deleteMany();
+        await prisma.account.deleteMany();
+        await prisma.session.deleteMany();
+        await prisma.user.deleteMany();
+        console.log('⚠️  SEED_RESET=true: existing data was cleared');
+    }
     const passwordHash = await bcrypt.hash('password123', 12);
-    const user = await prisma.user.create({
-        data: {
+    const user = await prisma.user.upsert({
+        where: { email: 'demo@tradejournal.app' },
+        update: {
+            passwordHash,
+            name: 'Demo Trader',
+            timezone: 'UTC',
+        },
+        create: {
             email: 'demo@tradejournal.app',
             passwordHash,
             name: 'Demo Trader',
             timezone: 'UTC',
         },
     });
-    console.log(`✅ Created user: ${user.email}`);
-    const account = await prisma.account.create({
-        data: {
-            userId: user.id,
-            name: 'Main Account',
-            broker: 'IC Markets',
-            accountNumber: '12345678',
-            currency: 'USD',
-            initialBalance: new library_1.Decimal(10000),
-            apiKey: 'demo-api-key-' + Date.now(),
-        },
+    console.log(`✅ Demo user ready: ${user.email}`);
+    let account = await prisma.account.findFirst({
+        where: { userId: user.id, name: { equals: 'Main Account', mode: 'insensitive' } },
     });
-    console.log(`✅ Created account: ${account.name}`);
+    if (!account) {
+        account = await prisma.account.create({
+            data: {
+                userId: user.id,
+                name: 'Main Account',
+                broker: 'IC Markets',
+                accountNumber: '12345678',
+                currency: 'USD',
+                initialBalance: new library_1.Decimal(10000),
+                apiKey: 'demo-api-key-' + Date.now(),
+            },
+        });
+        console.log(`✅ Created account: ${account.name}`);
+    }
+    else {
+        console.log(`✅ Existing account kept: ${account.name}`);
+    }
     const tagData = [
         { name: 'Trend', color: '#6366f1' },
         { name: 'Breakout', color: '#10b981' },
@@ -51,8 +69,16 @@ async function main() {
         { name: 'Scalp', color: '#8b5cf6' },
         { name: 'Swing', color: '#06b6d4' },
     ];
-    const tags = await Promise.all(tagData.map(t => prisma.tag.create({ data: { userId: user.id, ...t } })));
-    console.log(`✅ Created ${tags.length} tags`);
+    const tags = await Promise.all(tagData.map(t => prisma.tag.upsert({
+        where: { userId_name: { userId: user.id, name: t.name } },
+        update: { color: t.color },
+        create: { userId: user.id, ...t },
+    })));
+    console.log(`✅ Ensured ${tags.length} tags`);
+    if (!reset) {
+        console.log('ℹ️  Existing trades/accounts were preserved (set SEED_RESET=true to wipe)');
+        return;
+    }
     const trades = [];
     const now = new Date();
     for (let i = 89; i >= 0; i--) {

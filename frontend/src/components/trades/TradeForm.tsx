@@ -127,7 +127,7 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
                     className={cn(
                       'flex-1 flex items-center justify-center gap-1 text-xs font-medium transition-colors',
                       field.value === dir
-                        ? dir === 'BUY' ? 'bg-[#EAF3DE] text-[#27500A]' : 'bg-[#FCEBEB] text-[#791F1F]'
+                        ? dir === 'BUY' ? 'ui-badge-buy' : 'ui-badge-sell'
                         : 'text-muted-foreground hover:bg-accent',
                     )}
                   >

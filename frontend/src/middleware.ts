@@ -6,13 +6,17 @@ const PUBLIC_PATHS = ['/login', '/register'];
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Never gate Next internals/assets (RSC/data/chunks/HMR/etc).
+  if (pathname.startsWith('/_next')) {
+    return NextResponse.next();
+  }
+
   // Allow public routes through
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  // Check for refresh token in auth store (persisted to localStorage)
-  // For SSR we check a cookie that we set on login
+  // Auth gate via refresh-token cookie set on login/refresh.
   const authCookie = request.cookies.get('tj-auth');
 
   if (!authCookie?.value) {
@@ -26,6 +30,6 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|login|register).*)',
+    '/((?!api|_next|favicon.ico|login|register).*)',
   ],
 };

@@ -27,9 +27,11 @@ export default function LoginPage() {
     try {
       await login(data.email, data.password);
       router.push('/dashboard');
-    } catch (e) {
+    } catch (e: any) {
       console.error('Login error:', e);
-      setError('Invalid email or password');
+      const backendMessage = e?.response?.data?.message;
+      const networkMessage = !e?.response ? 'Cannot reach API server. Verify backend is running and reachable at your API URL.' : null;
+      setError(backendMessage ?? networkMessage ?? 'Sign in failed. Please try again.');
     }
   };
 

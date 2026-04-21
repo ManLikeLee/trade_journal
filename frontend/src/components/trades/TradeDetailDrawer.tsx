@@ -98,7 +98,7 @@ export function TradeDetailDrawer({ tradeId, onClose }: TradeDetailDrawerProps) 
             <div className="p-3.5 space-y-3.5">
               {/* P&L hero */}
               {trade.pnl !== null && (
-                <div className={cn('rounded-[10px] p-3 text-center border', pnl >= 0 ? 'bg-[#EAF3DE] border-[#CFE2B5]' : 'bg-[#FCEBEB] border-[#F1C6C6]')}>
+                <div className={cn('p-3 text-center', pnl >= 0 ? 'ui-surface-profit' : 'ui-surface-loss')}>
                   <p className="text-[10.5px] font-medium opacity-80 mb-1">Net P&L</p>
                   <p className="text-[24px] leading-none font-medium tabular-nums">
                     {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}

@@ -67,6 +67,18 @@ export interface AnalyticsSummary {
   maxDrawdownPct: number;
 }
 
+type AnalyticsParams = { accountId?: string; from?: string; to?: string };
+
+function analyticsKey(scope: string, params: AnalyticsParams) {
+  return [
+    'analytics',
+    scope,
+    params.accountId ?? '',
+    params.from ?? '',
+    params.to ?? '',
+  ];
+}
+
 // ── Trades hooks ─────────────────────────────────────────────
 export function useTrades(filters: TradeFilters = {}) {
   return useQuery({
@@ -111,30 +123,30 @@ export function useDeleteTrade() {
 }
 
 // ── Analytics hooks ──────────────────────────────────────────
-export function useAnalyticsSummary(params: { accountId?: string; from?: string; to?: string } = {}) {
+export function useAnalyticsSummary(params: AnalyticsParams = {}) {
   return useQuery({
-    queryKey: ['analytics', 'summary', params],
+    queryKey: analyticsKey('summary', params),
     queryFn: () => api.get('/analytics/summary', { params }).then(r => r.data),
   });
 }
 
-export function useEquityCurve(params: { accountId?: string; from?: string; to?: string } = {}) {
+export function useEquityCurve(params: AnalyticsParams = {}) {
   return useQuery({
-    queryKey: ['analytics', 'equity-curve', params],
+    queryKey: analyticsKey('equity-curve', params),
     queryFn: () => api.get('/analytics/equity-curve', { params }).then(r => r.data),
   });
 }
 
-export function usePnlByDay(params: { accountId?: string; from?: string; to?: string } = {}) {
+export function usePnlByDay(params: AnalyticsParams = {}) {
   return useQuery({
-    queryKey: ['analytics', 'pnl-by-day', params],
+    queryKey: analyticsKey('pnl-by-day', params),
     queryFn: () => api.get('/analytics/pnl-by-day', { params }).then(r => r.data),
   });
 }
 
-export function usePnlBySymbol(params: { accountId?: string; from?: string; to?: string } = {}) {
+export function usePnlBySymbol(params: AnalyticsParams = {}) {
   return useQuery({
-    queryKey: ['analytics', 'pnl-by-symbol', params],
+    queryKey: analyticsKey('pnl-by-symbol', params),
     queryFn: () => api.get('/analytics/pnl-by-symbol', { params }).then(r => r.data),
   });
 }

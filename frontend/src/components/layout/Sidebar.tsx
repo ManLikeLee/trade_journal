@@ -8,6 +8,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/lib/auth';
 import { useAccounts } from '@/hooks/useTrades';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -25,7 +26,7 @@ export function Sidebar() {
   const { data: accounts } = useAccounts();
 
   return (
-    <aside className="flex h-full flex-col w-[var(--sidebar-width)] border-r border-border/90 bg-card">
+    <aside className="flex h-full flex-col w-[var(--sidebar-width)] border-r border-border/90 bg-card/95 dark:bg-[rgba(10,16,28,0.88)]">
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 h-14 border-b border-border/90 shrink-0">
         <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary">
@@ -78,7 +79,7 @@ export function Sidebar() {
               className={cn(
                 'flex items-center gap-2 px-2.5 py-[7px] rounded-md text-[12.5px] font-medium transition-colors',
                 active
-                  ? 'bg-[#E6F1FB] text-[#185FA5]'
+                  ? 'ui-nav-active'
                   : 'text-muted-foreground hover:text-foreground hover:bg-accent',
               )}
             >
@@ -91,8 +92,8 @@ export function Sidebar() {
 
       {/* User footer */}
       <div className="px-2 pb-2 pt-2 border-t border-border/90 mt-auto">
-        <div className="flex items-center gap-2 px-2.5 py-2 rounded-md bg-accent/90">
-          <div className="w-6 h-6 rounded-full bg-[#E6F1FB] flex items-center justify-center text-[10px] font-semibold text-[#185FA5] shrink-0">
+        <div className="flex items-center gap-2 px-2.5 py-2 rounded-md bg-accent/85 border border-border/70">
+          <div className="w-6 h-6 rounded-full ui-nav-active flex items-center justify-center text-[10px] font-semibold shrink-0">
             {user?.name?.[0]?.toUpperCase() ?? user?.email?.[0]?.toUpperCase() ?? '?'}
           </div>
           <div className="flex-1 min-w-0">
@@ -106,6 +107,9 @@ export function Sidebar() {
           >
             <LogOut className="w-3 h-3" />
           </button>
+        </div>
+        <div className="mt-2 px-0.5">
+          <ThemeToggle compact className="w-full justify-center" />
         </div>
       </div>
     </aside>
