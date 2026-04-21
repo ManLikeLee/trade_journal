@@ -84,7 +84,7 @@ const columns = [
       return (
         <span className={cn(
           'text-[10px] px-1.5 py-0.5 rounded font-medium',
-          s === 'OPEN' ? 'bg-[#E6F1FB] text-[#185FA5]' : 'bg-muted text-muted-foreground',
+          s === 'OPEN' ? 'ui-badge-info' : 'bg-muted text-muted-foreground',
         )}>
           {s}
         </span>

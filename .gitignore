@@ -1,1 +1,5 @@
 node_modules/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo
+backend/dist/
+backend/prisma/dev.db

@@ -1,9 +1,23 @@
 import axios from 'axios';
 
+function normalizeBaseUrl(raw?: string) {
+  const value = (raw ?? '').trim();
+  const unquoted = value.replace(/^['"]|['"]$/g, '');
+  return unquoted.replace(/\/+$/, '');
+}
+
+const primaryBaseUrl = normalizeBaseUrl(
+  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api',
+);
+
+const localhostFallbackBaseUrl = primaryBaseUrl.includes('://localhost:')
+  ? primaryBaseUrl.replace('://localhost:', '://127.0.0.1:')
+  : null;
+
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api',
+  baseURL: primaryBaseUrl,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 15000,
+  timeout: 30000,
 });
 
 // Attach access token to every request
@@ -36,6 +50,13 @@ api.interceptors.response.use(
     // Never try to refresh a failed refresh request; that causes a deadlock.
     if (url.includes('/auth/refresh')) {
       return Promise.reject(error);
+    }
+
+    // Network-level failure (no HTTP response). Retry once via localhost fallback.
+    if (!error.response && original && !original._baseRetry && localhostFallbackBaseUrl) {
+      original._baseRetry = true;
+      original.baseURL = localhostFallbackBaseUrl;
+      return api(original);
     }
 
     if (error.response?.status === 401 && !original?._retry) {

@@ -23,26 +23,56 @@
     --ring: 220 90% 56%;
     --radius: 0.5rem;
     --sidebar-width: 208px;
+    --soft-info-bg: 213 100% 96%;
+    --soft-info-fg: 208 74% 38%;
+    --soft-success-bg: 95 55% 92%;
+    --soft-success-fg: 95 77% 18%;
+    --soft-danger-bg: 0 75% 95%;
+    --soft-danger-fg: 0 59% 30%;
+    --soft-success-border: 94 38% 80%;
+    --soft-danger-border: 0 57% 85%;
+    --chart-grid: 220 16% 86%;
+    --chart-axis: 220 10% 44%;
+    --chart-tooltip-bg: 0 0% 100%;
+    --chart-tooltip-border: 220 13% 84%;
+    --chart-tooltip-fg: 224 71% 4%;
+    --chart-tooltip-muted: 220 9% 44%;
+    --chart-crosshair: 220 16% 82%;
   }
 
   .dark {
-    --background: 224 71% 4%;
-    --foreground: 213 31% 91%;
-    --card: 224 71% 6%;
-    --card-foreground: 213 31% 91%;
-    --popover: 224 71% 6%;
-    --popover-foreground: 213 31% 91%;
+    --background: 222 38% 8%;
+    --foreground: 214 31% 92%;
+    --card: 222 33% 11%;
+    --card-foreground: 214 31% 92%;
+    --popover: 222 33% 11%;
+    --popover-foreground: 214 31% 92%;
     --primary: 220 90% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 215 28% 12%;
-    --secondary-foreground: 215 20% 65%;
-    --muted: 215 28% 12%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 215 28% 15%;
+    --secondary: 218 27% 15%;
+    --secondary-foreground: 215 20% 75%;
+    --muted: 218 27% 15%;
+    --muted-foreground: 215 18% 71%;
+    --accent: 217 27% 17%;
     --accent-foreground: 220 90% 60%;
-    --border: 215 28% 14%;
-    --input: 215 28% 14%;
+    --border: 217 19% 22%;
+    --input: 217 19% 24%;
     --ring: 220 90% 60%;
+    --soft-info-bg: 217 54% 19%;
+    --soft-info-fg: 213 97% 84%;
+    --soft-success-bg: 144 71% 14%;
+    --soft-success-fg: 142 74% 76%;
+    --soft-danger-bg: 0 62% 18%;
+    --soft-danger-fg: 0 87% 82%;
+    --soft-success-border: 143 64% 22%;
+    --soft-danger-border: 0 51% 28%;
+    --chart-grid: 217 20% 22%;
+    --chart-axis: 215 18% 72%;
+    --chart-tooltip-bg: 222 32% 12%;
+    --chart-tooltip-border: 217 19% 27%;
+    --chart-tooltip-fg: 214 31% 93%;
+    --chart-tooltip-muted: 215 16% 70%;
+    --chart-crosshair: 217 19% 30%;
   }
 }
 
@@ -77,6 +107,11 @@
 
   .dashboard-card {
     @apply rounded-[10px] border border-border bg-card;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 26px rgba(15, 23, 42, 0.06);
+  }
+
+  .dark .dashboard-card {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 36px rgba(2, 6, 23, 0.35);
   }
 
   .dashboard-card-title {
@@ -84,11 +119,15 @@
   }
 
   .dashboard-empty {
-    @apply flex items-center justify-center text-xs text-muted-foreground min-h-[160px];
+    @apply flex items-center justify-center text-xs text-muted-foreground min-h-[160px] rounded-md border border-dashed border-border/70 bg-muted/25;
   }
 
   .dashboard-skeleton {
-    @apply animate-pulse rounded-[10px] bg-muted;
+    @apply animate-pulse rounded-[10px] bg-muted/80;
+  }
+
+  .dark .dashboard-skeleton {
+    @apply bg-muted/65;
   }
 
   .section-card {
@@ -153,15 +192,46 @@
   }
 
   .ui-badge-buy {
-    @apply text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#EAF3DE] text-[#27500A];
+    @apply text-[10px] font-medium px-1.5 py-0.5 rounded border;
+    background-color: hsl(var(--soft-success-bg));
+    color: hsl(var(--soft-success-fg));
+    border-color: hsl(var(--soft-success-border));
   }
 
   .ui-badge-sell {
-    @apply text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#FCEBEB] text-[#791F1F];
+    @apply text-[10px] font-medium px-1.5 py-0.5 rounded border;
+    background-color: hsl(var(--soft-danger-bg));
+    color: hsl(var(--soft-danger-fg));
+    border-color: hsl(var(--soft-danger-border));
   }
 
   .ui-badge-muted {
     @apply text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground;
+  }
+
+  .ui-badge-info {
+    @apply text-[10px] font-medium px-1.5 py-0.5 rounded;
+    background-color: hsl(var(--soft-info-bg));
+    color: hsl(var(--soft-info-fg));
+  }
+
+  .ui-surface-profit {
+    @apply rounded-[10px] border;
+    background-color: hsl(var(--soft-success-bg));
+    border-color: hsl(var(--soft-success-border));
+    color: hsl(var(--soft-success-fg));
+  }
+
+  .ui-surface-loss {
+    @apply rounded-[10px] border;
+    background-color: hsl(var(--soft-danger-bg));
+    border-color: hsl(var(--soft-danger-border));
+    color: hsl(var(--soft-danger-fg));
+  }
+
+  .ui-nav-active {
+    background-color: hsl(var(--soft-info-bg));
+    color: hsl(var(--soft-info-fg));
   }
 }
 
