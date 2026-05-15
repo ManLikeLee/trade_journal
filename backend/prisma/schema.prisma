@@ -54,17 +54,18 @@ model Session {
 // ACCOUNTS (broker accounts)
 // ─────────────────────────────────────────
 model Account {
-  id           String      @id @default(cuid())
-  userId       String      @map("user_id")
-  name         String
-  broker       String
-  accountNumber String?    @map("account_number")
-  currency     String      @default("USD")
-  initialBalance Decimal   @default(0) @map("initial_balance") @db.Decimal(18, 2)
-  isActive     Boolean     @default(true) @map("is_active")
-  apiKey       String?     @map("api_key")  // for MT4/MT5 EA auth
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  id            String      @id @default(cuid())
+  userId        String      @map("user_id")
+  name          String
+  broker        String
+  platform      String?     // 'MT4' | 'MT5'
+  accountNumber String?     @map("account_number")
+  currency      String      @default("USD")
+  initialBalance Decimal    @default(0) @map("initial_balance") @db.Decimal(18, 2)
+  isActive      Boolean     @default(true) @map("is_active")
+  apiKey        String?     @map("api_key")  // for MT4/MT5 EA auth
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
 
   user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   trades       Trade[]
@@ -138,6 +139,7 @@ enum TradeStatus {
 
 enum TradeSource {
   MANUAL
+  MT_SYNC
   MT4
   MT5
   API
@@ -151,6 +153,8 @@ model TradeNote {
   tradeId   String    @map("trade_id")
   content   String    @db.Text
   emotion   Emotion?
+  mistake   String?   @db.Text
+  lesson    String?   @db.Text
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 

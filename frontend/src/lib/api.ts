@@ -7,7 +7,7 @@ function normalizeBaseUrl(raw?: string) {
 }
 
 const primaryBaseUrl = normalizeBaseUrl(
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api',
+  process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:5000/api',
 );
 
 const localhostFallbackBaseUrl = primaryBaseUrl.includes('://localhost:')

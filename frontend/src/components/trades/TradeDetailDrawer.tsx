@@ -45,18 +45,19 @@ export function TradeDetailDrawer({ tradeId, onClose }: TradeDetailDrawerProps) 
     }
   };
 
+  // Don't mount ANY fixed element (backdrop or panel) when no trade is selected.
+  // This prevents the always-on z-50 fixed element from interfering with other pages.
+  if (!tradeId) return null;
+
   return (
     <>
       {/* Backdrop */}
-      {tradeId && (
-        <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      )}
+      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Drawer */}
+      {/* Drawer panel — slides in from the right */}
       <div className={cn(
         'fixed inset-y-0 right-0 z-50 w-[440px] max-w-full bg-card border-l border-border shadow-xl',
-        'flex flex-col transition-transform duration-300 ease-out',
-        tradeId ? 'translate-x-0' : 'translate-x-full',
+        'flex flex-col animate-in slide-in-from-right duration-300',
       )}>
         {/* Header */}
         <div className="flex items-center justify-between px-3.5 py-3 border-b border-border shrink-0">
