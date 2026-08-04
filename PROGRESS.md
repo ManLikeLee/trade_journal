@@ -30,8 +30,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
       show the key once on create/regenerate.
 - [ ] **C8** — Add rate limiting on auth and sync endpoints.
 - [ ] **C9** — Hash refresh tokens and API keys at rest (SHA-256); unique index on the hash.
-- [ ] **C10** — Whitelist `sortBy` as a Zod enum on both ends; make `duration` non-sortable.
+- [x] **C10** — Whitelist `sortBy` as a Zod enum on both ends; make `duration` non-sortable.
       Clicking the Duration column header currently returns 500.
+      *Done 2026-08-04 — verified live against the running API, 500 → 400 → UI can't send it.*
 - [ ] **C11** — Purge `.env`, `backend/dist/`, `frontend/.next/` from git; add `.env*` to
       `.gitignore`; rotate any exposed value.
 - [ ] **C12** — Add CI (`tsc --noEmit` + lint + tests on PR) and an ESLint config.
@@ -102,6 +103,49 @@ live backend to confirm 200s — click-path handed to the user.
 
 **Deferred:** 1 item added (README's remaining stale prose).
 
+### 2026-08-04 — C10: sortBy whitelist, from/to validation, double-sort
+
+**Changed:**
+- `backend/src/modules/trades/trades.schema.ts` — exported `SORTABLE_FIELDS` (7 columns) and
+  `SortableField`; `sortBy: z.enum(SORTABLE_FIELDS).default('openTime')`; `from`/`to` now use
+  the existing `isoDate()` helper instead of bare `z.string()`.
+- `frontend/src/components/trades/TradesTable.tsx` — `enableSorting: false` on `duration`
+  (display-only), plus `direction`, `exitPrice` and `status` (real Prisma columns but outside
+  the whitelist, so the API rejects them); local `SORTABLE_COLUMN_IDS` mirror + type guard so
+  an unrecognised column id falls back to the API default instead of being forwarded;
+  `manualSorting: true` added and `getSortedRowModel()` removed.
+
+**Scope note — three sorts were disabled, not enabled.** The whitelist is the 7 fields the
+task and the audit both specify, but the table renders 10 columns. `direction`, `exitPrice`
+and `status` are real Prisma scalars whose sorting *worked* before this change; with the
+enum in place they would 400. I disabled them in the UI to satisfy "whitelisted or
+`enableSorting: false`". Adding them to both lists instead is a two-line change if sorting by
+Side / Exit / Status is wanted — say the word.
+
+**Verified live against the running backend** (not just typechecked):
+- Reproduced first: `?sortBy=duration` → **HTTP 500**, `?from=garbage` → **HTTP 500**.
+- After: `?sortBy=duration` → **400** with `{"path":"sortBy","message":"Invalid enum value…"}`.
+  Same for `direction`, `exitPrice`, `status`.
+- All 7 whitelisted fields → **200**, and with 3 seeded trades each produces the *correct
+  distinct ordering* (`pnl desc` → 120, 35, −50; `symbol asc` → EUR, GBP, XAU; `lotSize asc`
+  → 0.1, 0.2, 0.3; `openTime asc` → Jul 1, 2, 3). Sorting works, it is not merely accepted.
+- `from=garbage` / `to=garbage` → **400**; valid ISO ranges → **200**; no params → **200**
+  with defaults; `order=sideways` → **400**.
+- Column audit parsed from source: 10 columns, 6 sortable and whitelisted, 4 with
+  `enableSorting: false`, **0 unsafe**. `getSortedRowModel` absent, `manualSorting: true`
+  present, `manualPagination: true` retained.
+- The two duplicated whitelists compared programmatically: **identical**.
+- `npx tsc --noEmit` exit 0 in both packages.
+
+**Test data:** created and deleted a throwaway account + 3 trades. The user row
+`c10-verify-1785872978@claude-test.local` remains (no delete-user endpoint exists), as does
+`c2-verify-1785871217@claude-test.local` from C2.
+
+**Not verified:** the browser. The disabled headers should no longer show a sort cursor or
+chevron, and rows should keep the server's order when paging. Click-path below.
+
+**Deferred:** 2 items added.
+
 ---
 
 ## Deferred
@@ -131,6 +175,16 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   places (crypto, some indices) makes the field invalid and the browser silently refuses to
   submit — no error text, since these fields render none. Ties into the audit's crypto-precision
   finding and H11.
+- **Analytics silently ignores an invalid `from`/`to` instead of rejecting it.** C10 fixed the
+  trades query; `analytics.router.ts`'s own `QuerySchema` still declares `from`/`to` as bare
+  `z.string().optional()`. It does not 500 — `analytics.service.ts:29` runs them through a
+  `dateOrNull()` guard — but that means `?from=garbage` returns **HTTP 200 with all-time
+  data**, presented as though the requested date filter had applied. Verified live. Wrong
+  numbers stated confidently is arguably worse than an error; fix by reusing `isoDate()`.
+- **`from`/`to` on `/api/trades` now require a full ISO 8601 timestamp with offset**, so a
+  natural date-only range (`?from=2026-08-01`) returns 400. Nothing sends these today. If a
+  date-range picker is built later, either send `T00:00:00.000Z` or widen the schema with an
+  explicit date-only branch.
 - **README still states port 4000, Swagger docs at `/api/docs`, and a NestJS stack** (lines
   ~88, 89, 102 and the stack section). C2 corrected only the endpoint paths and the two sync
   URLs it rewrote; the rest of the stale prose is H12's job.

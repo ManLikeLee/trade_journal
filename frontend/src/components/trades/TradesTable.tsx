@@ -1,6 +1,6 @@
 'use client';
 import {
-  useReactTable, getCoreRowModel, getSortedRowModel,
+  useReactTable, getCoreRowModel,
   flexRender, createColumnHelper,
   type SortingState,
 } from '@tanstack/react-table';
@@ -12,6 +12,27 @@ import { formatCurrency, formatDateTime, formatTradeDuration, cn } from '@/lib/u
 
 const col = createColumnHelper<Trade>();
 
+/**
+ * Mirrors SORTABLE_FIELDS in backend/src/modules/trades/trades.schema.ts — the only values
+ * the API accepts for `sortBy`. Sorting is server-side, so a column id outside this list
+ * must never reach the query string. Keep the two lists in sync until H3 lands.
+ */
+const SORTABLE_COLUMN_IDS = [
+  'openTime',
+  'closeTime',
+  'symbol',
+  'pnl',
+  'lotSize',
+  'entryPrice',
+  'riskReward',
+] as const;
+
+type SortableColumnId = (typeof SORTABLE_COLUMN_IDS)[number];
+
+function isSortableColumnId(id: string | undefined): id is SortableColumnId {
+  return !!id && (SORTABLE_COLUMN_IDS as readonly string[]).includes(id);
+}
+
 const columns = [
   col.accessor('symbol', {
     header: 'Symbol',
@@ -21,6 +42,8 @@ const columns = [
   }),
   col.accessor('direction', {
     header: 'Side',
+    // Not in SORTABLE_FIELDS — the API would reject it with a 400.
+    enableSorting: false,
     cell: (info) => {
       const dir = info.getValue();
       return (
@@ -42,6 +65,8 @@ const columns = [
   }),
   col.accessor('exitPrice', {
     header: 'Exit',
+    // Not in SORTABLE_FIELDS — the API would reject it with a 400.
+    enableSorting: false,
     cell: (info) => info.getValue()
       ? <span className="font-mono text-xs">{Number(info.getValue()).toFixed(5)}</span>
       : <span className="text-muted-foreground text-[11px]">Open</span>,
@@ -71,6 +96,9 @@ const columns = [
   col.display({
     id: 'duration',
     header: 'Duration',
+    // Display-only: computed from openTime/closeTime, no such database column.
+    // Clicking this header used to send sortBy=duration and return a 500.
+    enableSorting: false,
     cell: ({ row }) => (
       <span className="text-xs text-muted-foreground">
         {formatTradeDuration(row.original.openTime, row.original.closeTime)}
@@ -79,6 +107,8 @@ const columns = [
   }),
   col.accessor('status', {
     header: 'Status',
+    // Not in SORTABLE_FIELDS — the API would reject it with a 400.
+    enableSorting: false,
     cell: (info) => {
       const s = info.getValue();
       return (
@@ -99,11 +129,16 @@ export function TradesTable() {
   const [filters, setFilters] = useState<TradeFilters>({ page: 1, limit: 20 });
   const [search, setSearch] = useState('');
 
+  // Every sortable column is whitelisted, but guard anyway: an unrecognised id must fall
+  // back to the API default rather than be forwarded and rejected.
+  const activeSort = sorting[0];
+  const sortBy = isSortableColumnId(activeSort?.id) ? activeSort.id : undefined;
+
   const { data, isLoading } = useTrades({
     ...filters,
     symbol: search || undefined,
-    sortBy: sorting[0]?.id,
-    order: sorting[0]?.desc ? 'desc' : 'asc',
+    sortBy,
+    order: sortBy ? (activeSort.desc ? 'desc' : 'asc') : undefined,
   });
 
   const table = useReactTable({
@@ -112,7 +147,9 @@ export function TradesTable() {
     state: { sorting },
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    // Sorting and pagination both happen server-side. Without manualSorting the table
+    // would re-sort the returned page client-side, reordering rows within the page.
+    manualSorting: true,
     manualPagination: true,
     pageCount: data?.meta?.pages ?? 1,
   });
