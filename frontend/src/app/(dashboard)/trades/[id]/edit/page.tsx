@@ -7,7 +7,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { formatCurrency, cn } from '@/lib/utils';
+import { formatCurrency, cn, datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/utils';
 import { useMemo } from 'react';
 
 const schema = z.object({
@@ -31,7 +31,7 @@ export default function EditTradePage({ params }: { params: Promise<{ id: string
       exitPrice:  trade.exitPrice  ? Number(trade.exitPrice)  : '',
       stopLoss:   trade.stopLoss   ? Number(trade.stopLoss)   : '',
       takeProfit: trade.takeProfit ? Number(trade.takeProfit) : '',
-      closeTime:  trade.closeTime  ? new Date(trade.closeTime).toISOString().slice(0, 16) : '',
+      closeTime:  isoToDatetimeLocal(trade.closeTime),
       commission: Number(trade.commission ?? 0),
       swap:       Number(trade.swap ?? 0),
     } : undefined,
@@ -53,7 +53,8 @@ export default function EditTradePage({ params }: { params: Promise<{ id: string
       exitPrice:  data.exitPrice  || undefined,
       stopLoss:   data.stopLoss   || undefined,
       takeProfit: data.takeProfit || undefined,
-      closeTime:  data.closeTime  || undefined,
+      // datetime-local values carry no offset; the API requires full ISO 8601.
+      closeTime:  datetimeLocalToIso(data.closeTime),
     });
     router.push(`/trades/${id}`);
   };

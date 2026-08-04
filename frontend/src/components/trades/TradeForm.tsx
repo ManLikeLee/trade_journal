@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { useCreateTrade, useAccounts } from '@/hooks/useTrades';
-import { formatCurrency, cn } from '@/lib/utils';
+import { formatCurrency, cn, datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/utils';
 import { useMemo } from 'react';
 import { ArrowDownRight, ArrowUpRight, Calculator } from 'lucide-react';
 
@@ -44,7 +44,7 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
       direction: 'BUY',
       commission: 0,
       swap: 0,
-      openTime: new Date().toISOString().slice(0, 16),
+      openTime: isoToDatetimeLocal(new Date().toISOString()),
       ...defaultValues,
     },
   });
@@ -79,7 +79,9 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
         exitPrice: data.exitPrice || undefined,
         stopLoss: data.stopLoss || undefined,
         takeProfit: data.takeProfit || undefined,
-        closeTime: data.closeTime || undefined,
+        // datetime-local values carry no offset; the API requires full ISO 8601.
+        openTime: datetimeLocalToIso(data.openTime),
+        closeTime: datetimeLocalToIso(data.closeTime),
       });
       router.push('/trades');
     } catch (e: any) {
