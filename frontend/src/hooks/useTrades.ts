@@ -140,14 +140,14 @@ export function useEquityCurve(params: AnalyticsParams = {}) {
 export function usePnlByDay(params: AnalyticsParams = {}) {
   return useQuery({
     queryKey: analyticsKey('pnl-by-day', params),
-    queryFn: () => api.get('/analytics/pnl-by-day', { params }).then(r => r.data),
+    queryFn: () => api.get('/analytics/by-day', { params }).then(r => r.data),
   });
 }
 
 export function usePnlBySymbol(params: AnalyticsParams = {}) {
   return useQuery({
     queryKey: analyticsKey('pnl-by-symbol', params),
-    queryFn: () => api.get('/analytics/pnl-by-symbol', { params }).then(r => r.data),
+    queryFn: () => api.get('/analytics/by-symbol', { params }).then(r => r.data),
   });
 }
 

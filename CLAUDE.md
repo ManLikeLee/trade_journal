@@ -145,18 +145,65 @@ carries `'use client'` — there are currently no Server Components and no serve
 
 ---
 
+## API surface
+
+Every route the backend registers, as of C2. Frontend paths are relative to the axios
+`baseURL`, which already ends in `/api` — so `api.get('/trades')` hits `/api/trades`.
+**If you add, rename, or remove a route, update this table in the same commit.**
+
+| Method | Path | Auth | Frontend call site |
+|---|---|---|---|
+| GET | `/` | — | none (liveness only) |
+| GET | `/health` | — | none (unconditional `ok`; H8 makes it real) |
+| POST | `/api/auth/register` | — | `lib/auth.ts` |
+| POST | `/api/auth/login` | — | `lib/auth.ts` |
+| POST | `/api/auth/refresh` | — | `lib/auth.ts` |
+| POST | `/api/auth/logout` | — | `lib/auth.ts` |
+| GET | `/api/auth/me` | Bearer | `lib/auth.ts` |
+| GET | `/api/accounts` | Bearer | `hooks/useTrades.ts` |
+| POST | `/api/accounts` | Bearer | `settings/page.tsx` |
+| GET | `/api/accounts/:id` | Bearer | **unused** |
+| PATCH | `/api/accounts/:id` | Bearer | **unused** (no edit UI) |
+| DELETE | `/api/accounts/:id` | Bearer | **unused** (no delete UI) |
+| POST | `/api/accounts/:id/regenerate-api-key` | Bearer | `settings/page.tsx` |
+| GET | `/api/trades` | Bearer | `hooks/useTrades.ts` |
+| POST | `/api/trades` | Bearer | `hooks/useTrades.ts` |
+| GET | `/api/trades/:id` | Bearer | `hooks/useTrades.ts` |
+| PATCH | `/api/trades/:id` | Bearer | `hooks/useTrades.ts` |
+| DELETE | `/api/trades/:id` | Bearer | `hooks/useTrades.ts` |
+| GET | `/api/trades/:tradeId/notes` | Bearer | **unused** (notes arrive via `TRADE_INCLUDE`) |
+| POST | `/api/trades/:tradeId/notes` | Bearer | `trades/[id]/page.tsx`, `TradeDetailDrawer.tsx` |
+| DELETE | `/api/trades/:tradeId/notes/:noteId` | Bearer | **unused** (no delete-note UI) |
+| GET | `/api/analytics/summary` | Bearer | `hooks/useTrades.ts` |
+| GET | `/api/analytics/equity-curve` | Bearer | `hooks/useTrades.ts` |
+| GET | `/api/analytics/by-symbol` | Bearer | `hooks/useTrades.ts` (`usePnlBySymbol`) |
+| GET | `/api/analytics/by-day` | Bearer | `hooks/useTrades.ts` (`usePnlByDay`) |
+| GET | `/api/analytics/by-session` | Bearer | **unused** |
+| GET | `/api/analytics/insights` | Bearer | `hooks/useInsights.ts` |
+| POST | `/api/mt-sync/trades` | `x-api-key` | `mt5/TradeJournalSyncEA.mq5` |
+
+Note the hook names `usePnlBySymbol` / `usePnlByDay` no longer match their route names
+(`by-symbol` / `by-day`) — the hooks and their TanStack query keys kept the old wording. Cache
+keys are internal, so this is cosmetic, but do not read the hook name as the path.
+
+`POST /api/mt-sync/trades` takes a **batch envelope**, not a single trade:
+`{ accountNumber, platform: 'MT4'|'MT5', trades: [...] }` — see `mt-sync.schema.ts`.
+
 ## ⚠️ The API contract is hand-maintained on both sides
 
 There is **no shared package, no OpenAPI spec, no generated client**. The frontend and the
-backend each declare every path and every payload shape by hand. This has already drifted and
-shipped four dead endpoints to `main`:
+backend each declare every path and every payload shape by hand. This has already drifted once
+and shipped four dead endpoints to `main` — all four fixed in C2, by moving the frontend onto
+the backend's path in every case:
 
-| Frontend calls | Backend registers |
-|---|---|
-| `/analytics/pnl-by-symbol` | `/analytics/by-symbol` |
-| `/analytics/pnl-by-day` | `/analytics/by-day` |
-| `/accounts/:id/regen-key` | `/accounts/:id/regenerate-api-key` |
-| `/trades/sync` (README + in-app EA snippet) | `/mt-sync/trades` |
+| Frontend called | Backend registers | Fixed in C2 |
+|---|---|---|
+| `/analytics/pnl-by-symbol` | `/analytics/by-symbol` | ✅ |
+| `/analytics/pnl-by-day` | `/analytics/by-day` | ✅ |
+| `/accounts/:id/regen-key` | `/accounts/:id/regenerate-api-key` | ✅ |
+| `/trades/sync` (README + in-app EA snippet) | `/mt-sync/trades` | ✅ |
+
+Nothing prevents a fifth. The table above is the only guard until H3.
 
 **Rule: any change to a route path, a request body, or a response shape must be applied to
 both sides in the same commit.** Before adding or renaming a route, grep the other side:

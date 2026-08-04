@@ -11,6 +11,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { useTheme } from '@/components/theme/theme-provider';
 
+/** Must match the axios baseURL in lib/api.ts, including the /api suffix. */
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:5000/api';
+
 const accountSchema = z.object({
   name:          z.string().min(1, 'Required'),
   broker:        z.string().min(1, 'Required'),
@@ -38,7 +41,7 @@ function AccountCard({ account }: { account: any }) {
   const [showKey, setShowKey] = useState(false);
 
   const regenKey = useMutation({
-    mutationFn: () => api.post(`/accounts/${account.id}/regen-key`).then(r => r.data),
+    mutationFn: () => api.post(`/accounts/${account.id}/regenerate-api-key`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
   });
 
@@ -86,28 +89,50 @@ function AccountCard({ account }: { account: any }) {
         </p>
       </div>
 
-      {/* EA setup code snippet */}
+      {/* Request format for the sync endpoint */}
       <details className="text-[11px]">
         <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium select-none">
-          Show EA code snippet
+          Show request format
         </summary>
+        <p className="mt-2 text-[10.5px] text-muted-foreground">
+          A ready-made Expert Advisor ships with the project at{' '}
+          <code className="font-mono">mt5/TradeJournalSyncEA.mq5</code> — set its{' '}
+          <code className="font-mono">ApiBaseUrl</code> and <code className="font-mono">ApiKey</code>{' '}
+          inputs and it sends exactly this. Trades are sent as a batch, not one per request.
+        </p>
         <pre className="mt-2 p-2.5 rounded-md bg-muted/55 border border-border overflow-x-auto text-[10.5px] font-mono text-muted-foreground">
-{`// MQL5 Expert Advisor — TradeJournal sync
-string API_URL = "${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'}/trades/sync";
-string API_KEY = "${account.apiKey ?? 'YOUR_API_KEY_HERE'}";
+{`POST ${API_BASE_URL}/mt-sync/trades
+Content-Type: application/json
+X-Api-Key: ${account.apiKey ?? 'YOUR_API_KEY_HERE'}
 
-void SendTrade(ulong ticket) {
-  string body = StringFormat(
-    "{\\"ticket\\":\\"%d\\",\\"symbol\\":\\"%s\\",...}",
-    ticket, Symbol());
-  string headers = "Content-Type: application/json\\r\\n"
-                 + "X-Api-Key: " + API_KEY;
-  char post[]; StringToCharArray(body, post);
-  char result[]; string rheaders;
-  WebRequest("POST", API_URL, headers, 5000,
-             post, result, rheaders);
+{
+  "accountNumber": "${account.accountNumber ?? '12345678'}",
+  "platform": "${account.platform ?? 'MT5'}",
+  "trades": [
+    {
+      "ticket": "123456789",
+      "symbol": "EURUSD",
+      "direction": "BUY",
+      "lotSize": 0.10,
+      "entryPrice": 1.08540,
+      "exitPrice": 1.08820,
+      "openTime": "2026-08-04T14:22:06.000Z",
+      "closeTime": "2026-08-04T16:41:12.000Z",
+      "pnl": 28.00,
+      "commission": -7.00,
+      "swap": -0.40,
+      "status": "CLOSED"
+    }
+  ]
 }`}
         </pre>
+        <p className="mt-2 text-[10.5px] text-muted-foreground">
+          Required per trade: <code className="font-mono">ticket</code>,{' '}
+          <code className="font-mono">symbol</code>, <code className="font-mono">direction</code>,{' '}
+          <code className="font-mono">lotSize</code>, <code className="font-mono">entryPrice</code>,{' '}
+          <code className="font-mono">openTime</code>, <code className="font-mono">status</code>.
+          Timestamps must be ISO 8601 with an offset.
+        </p>
       </details>
     </div>
   );
@@ -251,7 +276,7 @@ export default function SettingsPage() {
         <div className="text-xs text-muted-foreground space-y-2">
           <p>Your Expert Advisor sends trades to:</p>
           <code className="block bg-muted/50 rounded-md px-3 py-2 text-[11px] font-mono border border-border">
-            POST {process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api'}/trades/sync
+            POST {API_BASE_URL}/mt-sync/trades
           </code>
           <p className="text-[11px]">Authentication: <code className="font-mono text-[11px]">X-Api-Key</code> header with your account's API key.</p>
           <p className="text-[11px]">The <code className="font-mono">ticket</code> field is used as the idempotency key. Duplicate POSTs update existing trades rather than creating duplicates.</p>

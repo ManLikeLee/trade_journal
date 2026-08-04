@@ -146,29 +146,40 @@ unset DATABASE_URL
 
 ### EA HTTP Request
 
-Send a `POST` to `/api/trades/sync` with your API key:
+Send a `POST` to `/api/mt-sync/trades` with your API key. Trades are sent as a batch,
+wrapped in an envelope — not one request per trade:
 
 ```
-POST http://your-server:4000/api/trades/sync
+POST http://your-server:5000/api/mt-sync/trades
 X-Api-Key: your-account-api-key
 Content-Type: application/json
 
 {
-  "ticket": "12345678",
-  "symbol": "EURUSD",
-  "direction": "BUY",
-  "lotSize": 0.1,
-  "entryPrice": 1.08540,
-  "exitPrice": 1.08820,
-  "stopLoss": 1.08200,
-  "takeProfit": 1.09100,
-  "openTime": "2024-01-15T09:30:00Z",
-  "closeTime": "2024-01-15T14:22:00Z",
-  "pnl": 127.45,
-  "commission": 3.50,
-  "swap": -0.20
+  "accountNumber": "12345678",
+  "platform": "MT5",
+  "trades": [
+    {
+      "ticket": "12345678",
+      "symbol": "EURUSD",
+      "direction": "BUY",
+      "lotSize": 0.1,
+      "entryPrice": 1.08540,
+      "exitPrice": 1.08820,
+      "stopLoss": 1.08200,
+      "takeProfit": 1.09100,
+      "openTime": "2024-01-15T09:30:00.000Z",
+      "closeTime": "2024-01-15T14:22:00.000Z",
+      "pnl": 127.45,
+      "commission": 3.50,
+      "swap": -0.20,
+      "status": "CLOSED"
+    }
+  ]
 }
 ```
+
+Required per trade: `ticket`, `symbol`, `direction`, `lotSize`, `entryPrice`, `openTime`,
+`status`. Timestamps must be ISO 8601 with an offset.
 
 The `ticket` field is the idempotency key — safe to resend, will upsert not duplicate.
 For MT5/EA sync, send realized `pnl` on close payloads when available (preferred over backend approximation for non-FX symbols).
@@ -176,7 +187,7 @@ For MT5/EA sync, send realized `pnl` on close payloads when available (preferred
 ### MQL5 EA Template
 
 ```mql5
-string API_URL   = "http://your-server:4000/api/trades/sync";
+string API_URL   = "http://your-server:5000/api/mt-sync/trades";
 string API_KEY   = "your-api-key-here";
 
 // OPEN payload:
@@ -211,6 +222,7 @@ void SendTradePayload(string body) {
 | POST | /api/auth/login | Login |
 | POST | /api/auth/refresh | Refresh access token |
 | POST | /api/auth/logout | Invalidate refresh token |
+| GET | /api/auth/me | Current user (Bearer auth) |
 
 ### Trades
 | Method | Path | Description |
@@ -220,28 +232,33 @@ void SendTradePayload(string body) {
 | GET | /api/trades/:id | Get single trade |
 | PATCH | /api/trades/:id | Update trade |
 | DELETE | /api/trades/:id | Delete trade |
-| POST | /api/trades/sync | MT4/MT5 EA sync (X-Api-Key auth) |
-| GET | /api/trades/:id/notes | List notes |
-| POST | /api/trades/:id/notes | Add note with emotion |
-| DELETE | /api/trades/:id/notes/:noteId | Delete note |
+| GET | /api/trades/:tradeId/notes | List notes |
+| POST | /api/trades/:tradeId/notes | Add note with emotion |
+| DELETE | /api/trades/:tradeId/notes/:noteId | Delete note |
+
+### MT sync
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /api/mt-sync/trades | MT4/MT5 EA batch sync (X-Api-Key auth) |
 
 ### Analytics
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/analytics/summary | Win rate, PnL, RR, drawdown |
 | GET | /api/analytics/equity-curve | Running equity points |
-| GET | /api/analytics/pnl-by-day | Daily PnL |
-| GET | /api/analytics/pnl-by-symbol | Per-symbol breakdown |
-| GET | /api/analytics/win-loss-distribution | PnL buckets |
-| GET | /api/analytics/insights | AI rule-based insights |
+| GET | /api/analytics/by-day | Daily PnL |
+| GET | /api/analytics/by-symbol | Per-symbol breakdown |
+| GET | /api/analytics/by-session | Per-session breakdown |
+| GET | /api/analytics/insights | Rule-based insights |
 
 ### Accounts
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/accounts | List accounts |
 | POST | /api/accounts | Create account |
+| GET | /api/accounts/:id | Get single account |
 | PATCH | /api/accounts/:id | Update account |
-| POST | /api/accounts/:id/regen-key | Regenerate API key |
+| POST | /api/accounts/:id/regenerate-api-key | Regenerate API key |
 | DELETE | /api/accounts/:id | Delete account |
 
 ---

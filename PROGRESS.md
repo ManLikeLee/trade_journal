@@ -14,9 +14,10 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
 - [x] **C1** — Fix `datetime-local` → ISO 8601 serialisation in `TradeForm.tsx` and
       `trades/[id]/edit/page.tsx`. The core action (log a trade) returns 400 on every attempt.
       *Done 2026-08-04 — see log. Backend-verified; browser click-path still unrun.*
-- [ ] **C2** — Fix 4 endpoint path mismatches: `pnl-by-symbol` → `by-symbol`,
+- [x] **C2** — Fix 4 endpoint path mismatches: `pnl-by-symbol` → `by-symbol`,
       `pnl-by-day` → `by-day`, `regen-key` → `regenerate-api-key`, `/trades/sync` →
       `/mt-sync/trades` (README + in-app EA snippet).
+      *Done 2026-08-04 — see log. Cross-reference clean; browser click-path still unrun.*
 - [ ] **C3** — Implement server-side P&L with a symbol-spec table; subtract commission and
       swap; backfill existing rows. Manual trades currently persist `pnl = NULL` forever.
 - [ ] **C4** — Fix null/zero handling in `analyzeStreaks`; unify null policy across
@@ -61,6 +62,46 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
       prop, `accountNumber` in the sync payload, the MetaMask suppressor, the localhost
       fallback, `src/app/page.tsx`.
 
+### 2026-08-04 — C2: endpoint path mismatches
+
+**Changed:** backend path taken as canonical in all four cases.
+- `frontend/src/hooks/useTrades.ts:143,150` — `/analytics/pnl-by-day` → `/analytics/by-day`,
+  `/analytics/pnl-by-symbol` → `/analytics/by-symbol`.
+- `frontend/src/app/(dashboard)/settings/page.tsx:44` — `regen-key` → `regenerate-api-key`.
+- `settings/page.tsx` — the EA snippet advertised `/trades/sync` *and* a flat single-trade
+  body the endpoint would reject. Replaced the invented MQL5 with the real request contract
+  (batch envelope from `mt-sync.schema.ts`) plus a pointer to `mt5/TradeJournalSyncEA.mq5`;
+  the integration-guide block now shows `/mt-sync/trades`. Both blocks had hardcoded
+  `http://localhost:4000/api` fallbacks — replaced with a single `API_BASE_URL` const
+  defaulting to `http://127.0.0.1:5000/api`, matching `lib/api.ts` and the backend default.
+- `README.md` — sync endpoint, batch envelope, and the API reference table.
+- `CLAUDE.md` — new "API surface" section listing all 26 registered routes with their call
+  sites; drift table marked fixed.
+
+**Beyond the four, found while building the route inventory** — the README's API table had
+three further wrong or missing entries, all corrected: it listed
+`GET /api/analytics/win-loss-distribution`, which **does not exist** (the real route is
+`by-session`); it omitted `GET /api/auth/me` and `GET /api/accounts/:id`; and it documented
+the notes routes with `:id` where the code uses `:tradeId`.
+
+**Verified:** throwaway script (scratchpad, not committed) that parses every
+`api.<verb>('<path>')` call site out of `frontend/src` and every route registration out of
+`backend/src/modules/**/*.router.ts`, resolves each against the `app.use()` mount prefixes,
+normalises `${expr}` and `:param`, and compares both directions.
+**22 frontend call sites vs 26 backend routes → 0 mismatches** (exit 0). 7 routes are
+registered but never called from the frontend; all 7 are expected (`mt-sync` is the EA's,
+the rest are unbuilt UI) and are marked **unused** in the CLAUDE.md table.
+Repo-wide grep for `trades/sync`, `pnl-by-symbol`, `pnl-by-day`, `regen-key`,
+`win-loss-distribution` returns only intentional references in `CLAUDE.md`/`PROGRESS.md` plus
+two TanStack **query keys** (`analyticsKey('pnl-by-day'|'pnl-by-symbol')`) which are internal
+cache identifiers, not URLs — left alone, documented in CLAUDE.md.
+`npx tsc --noEmit` exit 0 in both packages.
+
+**Not verified:** the browser. The two dashboard charts and the regenerate-key button need a
+live backend to confirm 200s — click-path handed to the user.
+
+**Deferred:** 1 item added (README's remaining stale prose).
+
 ---
 
 ## Deferred
@@ -90,6 +131,9 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   places (crypto, some indices) makes the field invalid and the browser silently refuses to
   submit — no error text, since these fields render none. Ties into the audit's crypto-precision
   finding and H11.
+- **README still states port 4000, Swagger docs at `/api/docs`, and a NestJS stack** (lines
+  ~88, 89, 102 and the stack section). C2 corrected only the endpoint paths and the two sync
+  URLs it rewrote; the rest of the stale prose is H12's job.
 - **`currency` can be saved blank.** The Settings account form registers `currency` as a plain
   text input, so leaving it empty submits `''`; both the frontend and backend Zod schemas apply
   `.default('USD')` only when the field is `undefined`, and neither sets a `min(1)`. The account
