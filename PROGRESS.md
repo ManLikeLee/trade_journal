@@ -21,8 +21,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
 - [x] **C3** — Implement server-side P&L with a symbol-spec table; subtract commission and
       swap; backfill existing rows. Manual trades currently persist `pnl = NULL` forever.
       *Done 2026-08-05. Verified live; your 16 real trades byte-identical before and after.*
-- [ ] **C4** — Fix null/zero handling in `analyzeStreaks`; unify null policy across
+- [x] **C4** — Fix null/zero handling in `analyzeStreaks`; unify null policy across
       `analytics.service.ts` and `insights.service.ts`. Depends on C3.
+      *Done 2026-08-05. 30 unpriced trades: old code claimed a 30-loss streak, new reports none.*
 - [ ] **C5** — Fix deployment: `HOST=0.0.0.0`, `CMD ["node","dist/server.js"]`, align
       PORT/EXPOSE/compose, add `output:'standalone'`, create `public/`, add `.dockerignore`.
 - [ ] **C6** — Move refresh token to an `httpOnly; Secure; SameSite=Strict` cookie; access
@@ -361,6 +362,73 @@ page and asserts a 200 would have caught it in seconds.
 **Note for C1:** the edit page has therefore never been reachable in a browser, so C1's
 `closeTime` round-trip remains browser-unverified even though its logic is proven.
 
+### 2026-08-05 — C4: one null/zero P&L policy across analytics and insights
+
+**New:** `backend/src/domain/trade-outcome.ts` — the policy as executable code
+(`classifyOutcome`, `realisedPnl`, `isPriced`, `pricedOnly`, `winRateOf`) so the two services
+share one implementation rather than two prose comments that can drift. Both services also
+carry a short policy header pointing at it.
+
+**Policy:** `pnl === null` → UNPRICED, excluded from every win/loss/streak/average statistic
+but counted and reported. `pnl === 0` → SCRATCH, a real outcome: counted in the priced total,
+excluded from wins, losses and the win-rate denominator, and it **breaks** a streak.
+
+**Changed:**
+- `analyzeStreaks` rewritten from `if (>0) … else` to an explicit four-way switch. The bare
+  `else` was the whole bug: every null and every genuine breakeven fell into it and was counted
+  as a loss.
+- `analyzeEmotions`, `analyzeDayOfWeek`, `analyzeHoldTime`, `analyzeSymbols` — every bare
+  `Number(t.pnl)` replaced with an explicit null check. `analyzeHoldTime`'s minimum-sample gate
+  now counts priced trades, not bucket size: three unpriced trades are not three data points.
+- `generateInsights` — the `< 5` guard counts priced trades, and the message names how many
+  trades were excluded and why, instead of silently under-reporting.
+- `getSummary` — `totalTrades` now means *all closed trades*, matching its label and the trades
+  table. Added `pricedTrades`, `unpricedTrades` and `scratchCount`. Previously `totalTrades`
+  meant "trades with a P&L", which is why the dashboard showed a smaller number than the table.
+- Frontend `AnalyticsSummary` updated with the three new fields to keep both sides in sync.
+- The five analyzers are now exported: they are pure functions over trade arrays, so the policy
+  is testable without a database.
+
+**Verified — 34 assertions over 11 fixtures, all passing:**
+
+| Fixture | Streaks | Insight emitted |
+|---|---|---|
+| all wins (6) | current 0, max 0 | none |
+| all losses (6) | current 6, max 6 | both |
+| mixed | current 3, max 3 | current only |
+| **all nulls (6)** | **current 0, max 0** | **none** |
+| **all zeros (6 scratches)** | **current 0, max 0** | **none** |
+| null mid losing streak | current 4, max 4 | current only |
+| null mid long streak | current 6, max 6 | both |
+| scratch mid losing streak | current 2, max 2 | none — the scratch split it |
+| scratch splits a long streak | current 3, max 3 | current only |
+| losses then a scratch | current 0, max 5 | max only |
+| **30 hand-logged unpriced** | **current 0, max 0** | **none** |
+
+Thresholds are part of the assertion: `current-losing-streak` fires at ≥3, `max-losing-streak`
+at ≥5. My first run reported 5 failures — all of them **wrong expectations in the fixture**,
+not defects: I had asserted insights at streak values below those thresholds. Corrected and
+re-run.
+
+**Cross-service agreement proven live** on a seeded account of 7 closed trades (1 win, 2
+losses, 1 scratch, 3 unpriced):
+`GET /analytics/summary` → `totalTrades 7, pricedTrades 4, unpricedTrades 3, win 1, loss 2,
+scratch 1, winRate 33.33`; `GET /analytics/insights` → *"You have 4 so far. 3 further trades
+have no P&L recorded."* Both report **4 priced, 3 unpriced**. `win + loss + scratch = priced`,
+and the scratch is correctly outside the win-rate denominator.
+
+**The audit's scenario, reproduced end to end.** With 30 hand-logged unpriced trades in the
+account, the API returns **no losing-streak insight at all**. The old logic over the same
+ordering yields `max losing streak = 30` — *"Your worst streak was 30 consecutive losses."*
+
+`npx tsc --noEmit` exit 0 in both packages. All 39 seeded rows and the test user deleted; your
+19 real trades untouched.
+
+**Not verified:** the browser. The dashboard's trade-count tile and the insights panel need a
+visual check.
+
+**Deferred:** 2 items added.
+
 ---
 
 ## Deferred
@@ -394,6 +462,14 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
   remotely reachable, and changing it means altering the Postgres role and updating `.env`
   together. Worth doing if that database is ever exposed beyond this machine.
+- **The dashboard does not yet surface `unpricedTrades`.** The API now returns it and the
+  frontend type carries it, but no component renders it. Until it does, a user with unpriced
+  trades sees `totalTrades` and the money figures without being told the two cover different
+  sets. Small UI addition, belongs with H11/M12.
+- **`analyzeStreaks` skips unpriced trades rather than breaking the run.** `[-5, -6, null, -7]`
+  therefore reads as a 3-trade losing streak. The alternative — treating an unknown result as a
+  break — would understate real streaks. Chosen deliberately and asserted in the fixtures;
+  revisit if it reads wrong to a trader.
 - **Analytics silently ignores an invalid `from`/`to` instead of rejecting it.** C10 fixed the
   trades query; `analytics.router.ts`'s own `QuerySchema` still declares `from`/`to` as bare
   `z.string().optional()`. It does not 500 — `analytics.service.ts:29` runs them through a
