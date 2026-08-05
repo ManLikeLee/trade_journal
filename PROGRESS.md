@@ -329,6 +329,38 @@ MT5's symbol specification before altering it.
 bad `pnl = 0.00` (GER40 26214→26219 and XAUUSD 2400→2405). They will skew analytics until
 deleted or re-saved.
 
+### 2026-08-05 — Bug: trade detail and edit pages threw on every open (pre-existing)
+
+**Reported by the user:** clicking any row in the trade log showed the error boundary,
+"Something went wrong".
+
+**Root cause — pre-existing, not introduced by this session's work.** Both
+`trades/[id]/page.tsx` and `trades/[id]/edit/page.tsx` typed `params` as
+`Promise<{ id: string }>` and unwrapped it with React's `use(params)`. That is the **Next.js
+15** contract. This project is on **Next.js 14.2.0 with React 18.3.1**, where `params` is a
+plain object, so `use()` rejected it outright. Reproduced by server-rendering the route:
+
+```
+⨯ Error: An unsupported type was passed to use(): [object Object]
+    at TradeDetailPage (trades/[id]/page.tsx)
+GET /trades/<id> 500
+```
+
+**Fixed** by destructuring `params` directly and correcting the type on both pages.
+
+**Verified:** `GET /trades/<id>` and `GET /trades/<id>/edit` both **500 → 200**, no errors in
+the dev server log. Both typechecks exit 0.
+
+**Why nothing caught this earlier.** `tsc` passes either way — the annotation was simply a lie,
+and TypeScript checks the annotation, not Next's actual runtime contract. Every verification so
+far has been at the API layer or over pure functions; neither exercises a React render. This is
+precisely the audit's thesis — the code was written, typechecked, and never run. The cheapest
+guard is the Playwright happy path in **H4**; a route-level smoke test that server-renders each
+page and asserts a 200 would have caught it in seconds.
+
+**Note for C1:** the edit page has therefore never been reachable in a browser, so C1's
+`closeTime` round-trip remains browser-unverified even though its logic is proven.
+
 ---
 
 ## Deferred
