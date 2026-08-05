@@ -18,8 +18,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
       `pnl-by-day` → `by-day`, `regen-key` → `regenerate-api-key`, `/trades/sync` →
       `/mt-sync/trades` (README + in-app EA snippet).
       *Done 2026-08-04 — see log. Cross-reference clean; browser click-path still unrun.*
-- [ ] **C3** — Implement server-side P&L with a symbol-spec table; subtract commission and
+- [x] **C3** — Implement server-side P&L with a symbol-spec table; subtract commission and
       swap; backfill existing rows. Manual trades currently persist `pnl = NULL` forever.
+      *Done 2026-08-05. Verified live; your 16 real trades byte-identical before and after.*
 - [ ] **C4** — Fix null/zero handling in `analyzeStreaks`; unify null policy across
       `analytics.service.ts` and `insights.service.ts`. Depends on C3.
 - [ ] **C5** — Fix deployment: `HOST=0.0.0.0`, `CMD ["node","dist/server.js"]`, align
@@ -232,6 +233,65 @@ note it still contains the old secret.
 **Caveat:** GitHub may keep the pre-rewrite objects reachable by direct commit SHA in its cache
 for some time. The secret they contain is dead, but ask GitHub Support to run a GC if you want
 them unreachable.
+
+### 2026-08-05 — C3: server-side P&L
+
+**New:** `backend/src/domain/symbol-spec.ts` (41 instruments + 21 broker aliases, normalisation,
+null for unknown), `backend/src/domain/pnl.ts` (`grossPnl`/`netPnl`/`computePnl`/
+`computeRiskReward`, Decimal throughout), `backend/src/modules/symbol-specs/` (GET
+/api/symbol-specs), `backend/src/scripts/backfill-pnl.ts`, `frontend/src/lib/pnl-preview.ts`,
+`frontend/src/hooks/useSymbolSpecs.ts`.
+
+**Changed:** `computeMetrics` now calculates instead of echoing; its three unused parameters are
+gone and it takes `symbol` + `accountCurrency`. All three call sites wired (`syncTrade` now
+takes the account, which the mt-sync router already had). `analytics.service.ts`'s duplicate
+risk:reward deleted in favour of the shared one. Both trade forms use the shared preview;
+commission accepts negatives on both; TradeForm gained an optional "Realised P&L" override and
+its `symbol` cap was raised 10 → 20 to match the backend (`GER40.CASH` is 10 characters and was
+previously unenterable).
+
+**Decisions taken (see the plan and the user's calls):** costs are negative (MT5 convention,
+matching stored data); FX conversion exact-or-refuse; script under `src/` so it is typechecked;
+spec table served to the frontend rather than duplicated.
+
+**Two design corrections found while building:**
+1. `updateTrade` merged the stored `pnl` back into the calculation, which would have frozen a
+   manual trade's figure — editing commission would not have moved P&L. Now a stored `pnl` is
+   authoritative only when `source !== MANUAL`.
+2. A supplied `pnl` must win even for symbols we *can* calculate, otherwise an EA's broker
+   figure would be replaced by our estimate.
+
+**Verified — 27 pure-function assertions plus a live round-trip through the API:**
+
+| Case | Hand-calculated | Stored by the API |
+|---|---|---|
+| EURUSD BUY 0.1 @ 1.0850→1.0870 | `0.0020 × 0.1 × 100000` = 20.00 | **20.00** |
+| USDJPY BUY 0.5 @ 150.00→150.30 | `0.30 × 0.5 × 100000` = ¥15,000 ÷ 150.30 = 99.80 | **99.80** |
+| XAUUSD BUY 0.1 @ 2400→2405 | `5.00 × 0.1 × 100` = 50.00 | **50.00** |
+| …with commission −7.00, swap −1.20 | `50.00 − 7.00 − 1.20` = 41.80 | **41.80** |
+
+Also proven live: positive swap credits (+0.20 → 50.20); SELL sign both ways; `GER40.CASH` and
+`WOBBLE99` and open trades store `pnl = null` rather than a fabricated number; a supplied
+`pnl: 123.45` beats a calculable 50.00; `US100.CASH` resolves through the suffix rule and
+computes 20.25; PATCHing commission recalculates 50 → 43, PATCHing exitPrice → 93, PATCHing an
+explicit pnl → 500; an EA-synced GER40 keeps its broker figure −45.26 verbatim; EUR-account
+conversion (20 USD → 18.40 EUR) and `2000.10→2000.30` proving no float drift.
+
+**Backfill tested against real rows, not an empty set** — 5 NULL-pnl rows inserted directly via
+SQL, then: dry run reported 3 updatable + 4 skipped with reasons; `--apply` wrote exactly
+20.00 / 99.80 / 41.80; a second run reported **0 updates** (idempotent). All test rows and users
+then deleted.
+
+**Regression guard:** a fingerprint of all 16 real trades' `pnl` + `risk_reward` was taken
+before any C3 change and re-checked after everything including `--apply`:
+`9e37a35e29e5636a9ddcbee37c82a8af` both times. **Identical — your data was never touched.**
+
+`npx tsc --noEmit` exit 0 in both packages.
+
+**Not verified:** the browser. The preview, the new Realised P&L field and the "can't estimate"
+message need a visual check — click-path handed over.
+
+**Deferred:** 3 items added.
 
 ---
 

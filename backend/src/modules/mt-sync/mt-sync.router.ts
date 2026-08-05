@@ -32,7 +32,7 @@ mtSyncRouter.post('/trades', async (req: Request, res: Response, next: NextFunct
 
     for (const item of payload.trades) {
       try {
-        const result = await syncTrade(account.id, {
+        const result = await syncTrade(account, {
           ticket: item.ticket,
           symbol: item.symbol,
           direction: item.direction,

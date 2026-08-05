@@ -7,6 +7,8 @@ import { ArrowLeft } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { useSymbolSpecs } from '@/hooks/useSymbolSpecs';
+import { previewPnl } from '@/lib/pnl-preview';
 import { formatCurrency, cn, datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/utils';
 import { useMemo } from 'react';
 
@@ -15,7 +17,8 @@ const schema = z.object({
   stopLoss:   z.coerce.number().positive().optional().or(z.literal('')),
   takeProfit: z.coerce.number().positive().optional().or(z.literal('')),
   closeTime:  z.string().optional(),
-  commission: z.coerce.number().min(0).default(0),
+  // Costs are negative, matching MT5 and the stored data.
+  commission: z.coerce.number().default(0),
   swap:       z.coerce.number().default(0),
 });
 
@@ -23,6 +26,7 @@ export default function EditTradePage({ params }: { params: Promise<{ id: string
   const { id } = use(params);
   const router = useRouter();
   const { data: trade, isLoading } = useTrade(id);
+  const { data: specs } = useSymbolSpecs();
   const updateTrade = useUpdateTrade();
 
   const { register, handleSubmit, watch, formState: { isSubmitting, errors } } = useForm({
@@ -39,14 +43,27 @@ export default function EditTradePage({ params }: { params: Promise<{ id: string
 
   const [exitPrice, commission, swap] = watch(['exitPrice', 'commission', 'swap']);
 
-  const pnlPreview = useMemo(() => {
-    if (!trade || !exitPrice) return null;
-    const pipValue = Number(trade.lotSize) * 10;
-    const diff = trade.direction === 'BUY'
-      ? Number(exitPrice) - Number(trade.entryPrice)
-      : Number(trade.entryPrice) - Number(exitPrice);
-    return diff * pipValue * 10000 - Number(commission ?? 0) - Number(swap ?? 0);
-  }, [exitPrice, trade, commission, swap]);
+  // Same contract specifications the backend calculates with — the previous
+  // version hardcoded 4-decimal FX and was wrong for gold, indices and crypto.
+  const accountCurrency = trade?.account?.currency ?? 'USD';
+  const preview = useMemo(
+    () => previewPnl(
+      {
+        symbol: trade?.symbol ?? '',
+        direction: trade?.direction ?? 'BUY',
+        entryPrice: trade?.entryPrice,
+        exitPrice,
+        lotSize: trade?.lotSize,
+        commission,
+        swap,
+      },
+      specs,
+      accountCurrency,
+    ),
+    [trade, exitPrice, commission, swap, specs, accountCurrency],
+  );
+  const pnlPreview = preview.ok ? preview.net : null;
+  const cannotEstimate = !preview.ok && preview.reason !== 'INCOMPLETE';
 
   const onSubmit = async (data: any) => {
     await updateTrade.mutateAsync({ id, ...data,
@@ -127,9 +144,14 @@ export default function EditTradePage({ params }: { params: Promise<{ id: string
             <div className="p-2.5 rounded-md bg-muted/45 border border-border text-xs">
               Estimated P&L:{' '}
               <span className={cn('font-semibold tabular-nums', pnlPreview >= 0 ? 'text-profit' : 'text-loss')}>
-                {pnlPreview >= 0 ? '+' : ''}{formatCurrency(pnlPreview)}
+                {pnlPreview >= 0 ? '+' : ''}{formatCurrency(pnlPreview, accountCurrency)}
               </span>
             </div>
+          )}
+          {cannotEstimate && (
+            <p className="p-2.5 rounded-md bg-muted/45 border border-border text-xs text-muted-foreground">
+              P&L cannot be calculated for this symbol — it keeps the value already stored.
+            </p>
           )}
 
           {updateTrade.isError && (

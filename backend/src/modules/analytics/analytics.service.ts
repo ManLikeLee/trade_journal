@@ -1,5 +1,6 @@
 import { TradeDirection, TradeStatus } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import { computeRiskReward } from '../../domain/pnl';
 
 export interface AnalyticsQuery {
   accountId?: string;
@@ -60,26 +61,30 @@ function normalizeTrade(trade: Record<string, unknown>) {
   };
 }
 
+/**
+ * Risk:reward for a trade, preferring the value computed and stored on write.
+ *
+ * The fallback used to be a second, divergent implementation living here: it
+ * preferred `exitPrice ?? takeProfit` where the write path preferred
+ * `takeProfit ?? exitPrice`, so the same trade reported a different R:R
+ * depending on whether you read it from the trades table or from analytics.
+ * Both now call the single implementation in domain/pnl.ts.
+ */
 function resolveRiskReward(t: ReturnType<typeof normalizeTrade>): number | null {
   if (t.riskReward != null && Number.isFinite(t.riskReward) && t.riskReward > 0) {
     return t.riskReward;
   }
-  if (t.entryPrice == null || t.stopLoss == null) return null;
-  const rewardTarget = t.exitPrice ?? t.takeProfit;
-  if (rewardTarget == null) return null;
+  if (t.entryPrice == null) return null;
 
-  const risk =
-    t.direction === TradeDirection.BUY
-      ? t.entryPrice - t.stopLoss
-      : t.stopLoss - t.entryPrice;
-  const reward =
-    t.direction === TradeDirection.BUY
-      ? rewardTarget - t.entryPrice
-      : t.entryPrice - rewardTarget;
+  const rr = computeRiskReward({
+    direction: t.direction === TradeDirection.BUY ? 'BUY' : 'SELL',
+    entryPrice: t.entryPrice,
+    stopLoss: t.stopLoss,
+    takeProfit: t.takeProfit,
+    exitPrice: t.exitPrice,
+  });
 
-  if (risk <= 0) return null;
-  const rr = reward / risk;
-  return Number.isFinite(rr) ? rr : null;
+  return rr === null ? null : rr.toNumber();
 }
 
 function calcDrawdown(pnls: number[]): { maxDrawdown: number; maxDrawdownPct: number } {

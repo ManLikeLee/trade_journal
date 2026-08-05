@@ -1,8 +1,9 @@
 import { Decimal } from '@prisma/client/runtime/library';
-import { TradeDirection, TradeStatus } from '@prisma/client';
+import { TradeDirection, TradeStatus, TradeSource } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { ForbiddenError, NotFoundError, BadRequestError } from '../../utils/errors';
 import type { CreateTradeInput, UpdateTradeInput, TradesQuery, CreateNoteInput } from './trades.schema';
+import { computePnl, computeRiskReward, type PnlFailureReason } from '../../domain/pnl';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -12,7 +13,19 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Resolve the stored pnl and riskReward for a trade.
+ *
+ * Precedence for pnl:
+ *   1. A pnl supplied by the caller wins. An Expert Advisor reports the broker's
+ *      own realised figure — already net of costs — and no local estimate should
+ *      override the venue that actually settled the trade.
+ *   2. Otherwise calculate, if the trade is closed and the symbol is known.
+ *   3. Otherwise null, and the reason is returned so the caller can surface it.
+ */
 function computeMetrics(t: {
+  symbol: string;
+  accountCurrency: string;
   direction: TradeDirection;
   entryPrice: number;
   exitPrice?: number | null;
@@ -22,37 +35,35 @@ function computeMetrics(t: {
   commission: number;
   swap: number;
   pnl?: number | null;
-}) {
-  // Prefer explicitly provided PnL
+}): { pnl: Decimal | null; riskReward: Decimal | null; pnlReason?: PnlFailureReason } {
+  const riskReward = computeRiskReward({
+    direction: t.direction,
+    entryPrice: t.entryPrice,
+    stopLoss: t.stopLoss,
+    takeProfit: t.takeProfit,
+    exitPrice: t.exitPrice,
+  });
+
   if (t.pnl != null && Number.isFinite(t.pnl)) {
-    return { pnl: new Decimal(t.pnl), riskReward: computeRR(t) };
+    return { pnl: new Decimal(t.pnl), riskReward };
   }
-  return { pnl: null, riskReward: computeRR(t) };
-}
 
-function computeRR(t: {
-  direction: TradeDirection;
-  entryPrice: number;
-  stopLoss?: number | null;
-  takeProfit?: number | null;
-  exitPrice?: number | null;
-}): Decimal | null {
-  if (t.entryPrice == null || t.stopLoss == null) return null;
-  const rewardTarget = t.takeProfit ?? t.exitPrice;
-  if (rewardTarget == null) return null;
+  const result = computePnl(
+    {
+      symbol: t.symbol,
+      direction: t.direction,
+      entryPrice: t.entryPrice,
+      exitPrice: t.exitPrice,
+      lotSize: t.lotSize,
+      commission: t.commission,
+      swap: t.swap,
+    },
+    t.accountCurrency,
+  );
 
-  const risk =
-    t.direction === TradeDirection.BUY
-      ? t.entryPrice - t.stopLoss
-      : t.stopLoss - t.entryPrice;
-  const reward =
-    t.direction === TradeDirection.BUY
-      ? rewardTarget - t.entryPrice
-      : t.entryPrice - rewardTarget;
-
-  if (risk <= 0) return null;
-  const rr = reward / risk;
-  return Number.isFinite(rr) ? new Decimal(rr.toFixed(4)) : null;
+  return result.ok
+    ? { pnl: result.net, riskReward }
+    : { pnl: null, riskReward, pnlReason: result.reason };
 }
 
 function isClosedTrade(exitPrice?: number | null, closeTime?: Date | string | null): boolean {
@@ -74,9 +85,11 @@ const TRADE_INCLUDE = {
 // ── CRUD ─────────────────────────────────────────────────────
 
 export async function createTrade(userId: string, input: CreateTradeInput) {
-  await assertAccountOwner(userId, input.accountId);
+  const account = await assertAccountOwner(userId, input.accountId);
 
   const computed = computeMetrics({
+    symbol: input.symbol,
+    accountCurrency: account.currency,
     direction: input.direction as TradeDirection,
     entryPrice: input.entryPrice,
     exitPrice: input.exitPrice,
@@ -175,8 +188,22 @@ export async function updateTrade(userId: string, tradeId: string, input: Update
   const nextCloseTime = input.closeTime !== undefined ? new Date(input.closeTime) : trade.closeTime;
   const isClosed = isClosedTrade(nextExitPrice, nextCloseTime);
 
-  const mergedPnl = input.pnl !== undefined ? input.pnl : toNum(trade.pnl);
+  // Which pnl, if any, should be treated as authoritative rather than recalculated:
+  //   - one supplied in this request always wins (an explicit override)
+  //   - otherwise a stored pnl is authoritative only if it came from a broker
+  //     feed. A stored pnl on a MANUAL trade is our own earlier calculation, so
+  //     keeping it would freeze the figure — editing commission would leave P&L
+  //     untouched. Passing null forces a recalculation from the merged fields.
+  const mergedPnl =
+    input.pnl !== undefined
+      ? input.pnl
+      : trade.source === TradeSource.MANUAL
+      ? null
+      : toNum(trade.pnl);
+
   const computed = computeMetrics({
+    symbol: trade.symbol,
+    accountCurrency: trade.account.currency,
     direction: trade.direction,
     entryPrice: Number(trade.entryPrice),
     exitPrice: nextExitPrice,
@@ -274,7 +301,11 @@ export interface SyncTradeInput {
   source: 'MT4' | 'MT5';
 }
 
-export async function syncTrade(accountId: string, input: SyncTradeInput) {
+export async function syncTrade(
+  account: { id: string; currency: string },
+  input: SyncTradeInput,
+) {
+  const accountId = account.id;
   const existing = await prisma.trade.findFirst({
     where: { accountId, externalTicket: input.ticket },
   });
@@ -286,6 +317,8 @@ export async function syncTrade(accountId: string, input: SyncTradeInput) {
     input.pnl != null && Number.isFinite(input.pnl) ? new Decimal(input.pnl) : null;
 
   const computed = computeMetrics({
+    symbol: input.symbol,
+    accountCurrency: account.currency,
     direction: input.direction as TradeDirection,
     entryPrice: input.entryPrice,
     exitPrice: input.exitPrice,

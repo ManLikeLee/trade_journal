@@ -8,6 +8,7 @@ import { accountsRouter } from './modules/accounts/accounts.router';
 import { tradesRouter } from './modules/trades/trades.router';
 import { analyticsRouter } from './modules/analytics/analytics.router';
 import { mtSyncRouter } from './modules/mt-sync/mt-sync.router';
+import { symbolSpecsRouter } from './modules/symbol-specs/symbol-specs.router';
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.use('/api/accounts', accountsRouter);
 app.use('/api/trades', tradesRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/mt-sync', mtSyncRouter);
+app.use('/api/symbol-specs', symbolSpecsRouter);
 
 // ── Error handling ────────────────────────────────────────────
 app.use(notFound);

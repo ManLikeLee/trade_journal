@@ -4,13 +4,17 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { useCreateTrade, useAccounts } from '@/hooks/useTrades';
+import { useSymbolSpecs } from '@/hooks/useSymbolSpecs';
+import { previewPnl } from '@/lib/pnl-preview';
 import { formatCurrency, cn, datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/utils';
 import { useMemo } from 'react';
 import { ArrowDownRight, ArrowUpRight, Calculator } from 'lucide-react';
 
 const schema = z.object({
   accountId:  z.string().min(1, 'Select an account'),
-  symbol:     z.string().min(1, 'Symbol is required').max(10).toUpperCase(),
+  // max(20) matches CreateTradeSchema on the backend; broker symbols such as
+  // GER40.CASH exceed the 10 this previously allowed.
+  symbol:     z.string().min(1, 'Symbol is required').max(20).toUpperCase(),
   direction:  z.enum(['BUY', 'SELL']),
   lotSize:    z.coerce.number().positive('Must be positive'),
   entryPrice: z.coerce.number().positive(),
@@ -19,8 +23,12 @@ const schema = z.object({
   takeProfit: z.coerce.number().positive().optional().or(z.literal('')),
   openTime:   z.string().min(1, 'Required'),
   closeTime:  z.string().optional(),
-  commission: z.coerce.number().min(0).default(0),
+  // Costs are negative, matching MT5 and the stored data: a $7 charge is -7.
+  commission: z.coerce.number().default(0),
   swap:       z.coerce.number().default(0),
+  // Optional override. Used when the app cannot estimate P&L for a symbol, and
+  // whenever the trader prefers the broker's own figure.
+  pnl:        z.coerce.number().optional().or(z.literal('')),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -33,6 +41,7 @@ interface TradeFormProps {
 export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
   const router = useRouter();
   const { data: accounts } = useAccounts();
+  const { data: specs } = useSymbolSpecs();
   const createTrade = useCreateTrade();
 
   const {
@@ -49,19 +58,25 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
     },
   });
 
-  const [entryPrice, exitPrice, stopLoss, takeProfit, direction, lotSize, commission, swap] =
-    watch(['entryPrice', 'exitPrice', 'stopLoss', 'takeProfit', 'direction', 'lotSize', 'commission', 'swap']);
+  const [entryPrice, exitPrice, stopLoss, takeProfit, direction, lotSize, commission, swap, symbol, accountId] =
+    watch(['entryPrice', 'exitPrice', 'stopLoss', 'takeProfit', 'direction', 'lotSize', 'commission', 'swap', 'symbol', 'accountId']);
 
-  // Auto-calculate P&L preview
-  const pnlPreview = useMemo(() => {
-    if (!entryPrice || !exitPrice || !lotSize) return null;
-    const pipValue = Number(lotSize) * 10;
-    const diff = direction === 'BUY'
-      ? Number(exitPrice) - Number(entryPrice)
-      : Number(entryPrice) - Number(exitPrice);
-    const gross = diff * pipValue * 10000;
-    return gross - Number(commission ?? 0) - Number(swap ?? 0);
-  }, [entryPrice, exitPrice, direction, lotSize, commission, swap]);
+  const accountCurrency = accounts?.find((a: any) => a.id === accountId)?.currency ?? 'USD';
+
+  // P&L preview, using the same contract specifications the backend calculates
+  // with. The old version hardcoded 4-decimal FX (diff * lots * 10 * 10000),
+  // which overstated gold by 100x and indices by far more.
+  const preview = useMemo(
+    () => previewPnl(
+      { symbol, direction, entryPrice, exitPrice, lotSize, commission, swap },
+      specs,
+      accountCurrency,
+    ),
+    [symbol, direction, entryPrice, exitPrice, lotSize, commission, swap, specs, accountCurrency],
+  );
+  const pnlPreview = preview.ok ? preview.net : null;
+  // Only tell the user we can't estimate once they've given us enough to try.
+  const cannotEstimate = !preview.ok && preview.reason !== 'INCOMPLETE';
 
   // Auto-calculate R:R preview
   const rrPreview = useMemo(() => {
@@ -82,6 +97,9 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
         // datetime-local values carry no offset; the API requires full ISO 8601.
         openTime: datetimeLocalToIso(data.openTime),
         closeTime: datetimeLocalToIso(data.closeTime),
+        // Sent only when the trader supplied one — otherwise the backend
+        // calculates it, and an empty string would be coerced to 0.
+        pnl: data.pnl === '' || data.pnl == null ? undefined : data.pnl,
       });
       router.push('/trades');
     } catch (e: any) {
@@ -176,14 +194,24 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
       </div>
 
       {/* Auto-computed preview */}
-      {(pnlPreview !== null || rrPreview !== null) && (
+      {(pnlPreview !== null || rrPreview !== null || cannotEstimate) && (
         <div className="flex items-center gap-4 p-3 rounded-md bg-muted/45 border border-border">
           <Calculator className="w-4 h-4 text-muted-foreground shrink-0" />
           {pnlPreview !== null && (
             <div>
-              <p className="ui-help">Estimated P&L</p>
+              <p className="ui-help">Estimated P&L{preview.ok ? ` (${accountCurrency})` : ''}</p>
               <p className={cn('text-xs font-medium tabular-nums', pnlPreview >= 0 ? 'text-profit' : 'text-loss')}>
-                {pnlPreview >= 0 ? '+' : ''}{formatCurrency(pnlPreview)}
+                {pnlPreview >= 0 ? '+' : ''}{formatCurrency(pnlPreview, accountCurrency)}
+              </p>
+            </div>
+          )}
+          {cannotEstimate && (
+            <div>
+              <p className="ui-help">Estimated P&L</p>
+              <p className="text-xs text-muted-foreground">
+                {preview.ok ? null : preview.reason === 'UNKNOWN_SYMBOL'
+                  ? <>Unknown symbol — enter the realised P&L below.</>
+                  : <>Can&apos;t convert to {accountCurrency} — enter the realised P&L below.</>}
               </p>
             </div>
           )}
@@ -216,9 +244,10 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
           <label className="ui-label">Commission</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
-            <input {...register('commission')} type="number" step="0.01" placeholder="0.00"
+            <input {...register('commission')} type="number" step="0.01" placeholder="-7.00"
               className="ui-input-mono pl-7" />
           </div>
+          <p className="ui-help">Charges are negative, as your broker reports them.</p>
         </div>
         <div className="space-y-1.5">
           <label className="ui-label">Swap</label>
@@ -227,7 +256,25 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
             <input {...register('swap')} type="number" step="0.01" placeholder="0.00"
               className="ui-input-mono pl-7" />
           </div>
+          <p className="ui-help">Negative when charged, positive when credited.</p>
         </div>
+      </div>
+
+      {/* Realised P&L override */}
+      <div className="space-y-1.5">
+        <label className="ui-label">
+          Realised P&L <span className="text-muted-foreground font-normal">(optional)</span>
+        </label>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">$</span>
+          <input {...register('pnl')} type="number" step="0.01" placeholder="Leave blank to calculate"
+            className="ui-input-mono pl-7" />
+        </div>
+        <p className="ui-help">
+          {cannotEstimate
+            ? 'Required for this symbol — the P&L cannot be calculated automatically.'
+            : 'Leave blank and the P&L is calculated from your prices, net of commission and swap.'}
+        </p>
       </div>
 
       {/* Error summary */}

@@ -96,6 +96,52 @@ catch and call `next(err)`; do not write error responses inline.
 
 ---
 
+## Money: how P&L is decided
+
+`backend/src/domain/` holds the pure arithmetic — no Prisma, no HTTP. Two files:
+
+- **`symbol-spec.ts`** — contract sizes, pip sizes and quote currencies per instrument, plus
+  broker-symbol normalisation (`ger40.cash` → `GER40`, `NAS100` → `US100`). An unknown symbol
+  returns **null**, never a default: a wrong contract size is silently wrong by orders of
+  magnitude. The table is an approximation of retail conventions, not per-broker truth.
+- **`pnl.ts`** — `grossPnl`, `netPnl`, `computePnl`, `computeRiskReward`. Decimal end to end;
+  never convert to `Number` in this layer.
+
+**Precedence — a supplied `pnl` always wins.** An EA reports the broker's realised figure, and
+no local estimate may override the venue that settled the trade. The backend calculates only
+when no `pnl` was supplied and the trade is closed with an exit price. On `PATCH`, a stored
+`pnl` counts as authoritative only when `source !== MANUAL`; otherwise it is our own earlier
+estimate and gets recalculated, so editing commission actually moves the P&L.
+
+**`pnl` in the database is always NET** — after commission and swap — on both paths.
+
+**Costs are negative.** A charge is `-7.00`, matching MT5's `DEAL_COMMISSION` and the data
+already stored. Net P&L therefore *adds* commission and swap. Do not "fix" this to a
+subtraction.
+
+**Currency.** `grossPnl` lands in the instrument's *quote* currency. Conversion to the account
+currency is exact in two cases and refused otherwise:
+
+| Case | Rule |
+|---|---|
+| quote == account currency | unchanged (EURUSD on USD) |
+| base == account currency | divide by the trade's own price (USDJPY on USD) |
+| neither | **refuse** — `NO_FX_RATE`, `pnl` stays null (EURJPY or GER40 on USD) |
+
+Refusing is deliberate. The trade form surfaces it and offers a "Realised P&L" field for the
+trader to enter the broker's number instead.
+
+**Risk:reward** uses `takeProfit ?? exitPrice` — a *planning* metric fixed at entry, which must
+not change when a trade closes. There is exactly one implementation; analytics imports it. Two
+divergent copies previously disagreed with each other.
+
+**The frontend preview** (`lib/pnl-preview.ts`) repeats only the formula. The spec *data* is
+fetched from `GET /api/symbol-specs`, so the table cannot drift. The preview is an estimate;
+the stored figure is always the backend's.
+
+**Backfill:** `backend/src/scripts/backfill-pnl.ts`. Dry run by default, `--apply` to write.
+Only ever fills nulls, so it is idempotent and can never overwrite a broker's figure.
+
 ## Database
 
 `backend/prisma/schema.prisma`. PostgreSQL. Models are PascalCase/camelCase in Prisma and
@@ -180,6 +226,7 @@ Every route the backend registers, as of C2. Frontend paths are relative to the 
 | GET | `/api/analytics/by-day` | Bearer | `hooks/useTrades.ts` (`usePnlByDay`) |
 | GET | `/api/analytics/by-session` | Bearer | **unused** |
 | GET | `/api/analytics/insights` | Bearer | `hooks/useInsights.ts` |
+| GET | `/api/symbol-specs` | Bearer | `hooks/useSymbolSpecs.ts` |
 | POST | `/api/mt-sync/trades` | `x-api-key` | `mt5/TradeJournalSyncEA.mq5` |
 
 Note the hook names `usePnlBySymbol` / `usePnlByDay` no longer match their route names
