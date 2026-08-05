@@ -33,11 +33,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
 - [x] **C10** — Whitelist `sortBy` as a Zod enum on both ends; make `duration` non-sortable.
       Clicking the Duration column header currently returns 500.
       *Done 2026-08-04 — verified live against the running API, 500 → 400 → UI can't send it.*
-- [ ] **C11** — Purge `.env`, `backend/dist/`, `frontend/.next/` from git; add `.env*` to
+- [x] **C11** — Purge `.env`, `backend/dist/`, `frontend/.next/` from git; add `.env*` to
       `.gitignore`; rotate any exposed value.
-      *Phase A done + JWT_SECRET rotated (2026-08-05). **Phase B — history rewrite and
-      force-push — awaiting explicit approval.** Until then `.git` stays at 207 MB and the old
-      secret remains readable in the public repo's history.*
+      *Done 2026-08-05. `.git` 207 MB → 480 KB; secret rotated and old token proven rejected.*
 - [ ] **C12** — Add CI (`tsc --noEmit` + lint + tests on PR) and an ESLint config.
 
 ## HIGH
@@ -184,6 +182,56 @@ outward-facing, so it is held pending explicit approval. A full backup bundle of
 written to `/tmp/tradejournal-backup-20260805-105137.bundle` (141 MB) beforehand.
 
 **Deferred:** 1 item added (Postgres password).
+
+### 2026-08-05 — C11 Phase B: history rewrite, force-push, secret verified dead
+
+**Changed:**
+- Rewrote all 15 commits with `git filter-branch --index-filter` (built in — `git-filter-repo`
+  and BFG are both absent and either would have meant a new download; 15 commits made
+  `filter-branch`'s slowness irrelevant), dropping `frontend/.next`, `backend/dist`,
+  `backend/.env`, `frontend/.env.local` from every commit. Then
+  `reflog expire --expire=now --all` + `gc --prune=now --aggressive`, then `push --force`.
+- `docker-compose.yml:38` — **the purge alone would not have removed the exposed secret.** The
+  hardcoded `JWT_SECRET: dev-secret-change-in-production` is byte-for-byte the value
+  `backend/.env` carried, and `docker-compose.yml` is a legitimately tracked file that was never
+  a purge target. Replaced with `${JWT_SECRET:?…}` so compose fails fast instead of booting
+  with a known signing key.
+- Deleted `frontend/.next` from disk (271 MB) and restarted both dev servers.
+
+**Result:**
+
+| | Before | After |
+|---|---|---|
+| `.git` | 207 MB | **480 KB** |
+| repo total | 1.0 GB | **639 MB** |
+| tracked files | 321 | **86** |
+| free disk | 5.2 GB | **6.8 GB** |
+
+**Verified:**
+- `git fsck` clean; 58 source files still tracked (unchanged); both `.env.example` templates
+  survived; working tree clean; **`npx tsc --noEmit` exit 0 in both packages** — the strongest
+  evidence the rewrite did not damage source.
+- 0 occurrences of `frontend/.next`, `backend/dist`, `backend/.env`, `frontend/.env.local`
+  anywhere in the new history.
+- Commit count 15 → 14. The dropped commit is `8dd115a "Sync frontend build artifacts"`,
+  confirmed against the backup bundle to have contained **only** `frontend/` build files, so
+  `--prune-empty` correctly removed a commit that no longer changed anything.
+- Remote `main` matches local (`fb38ae6`).
+  `raw.githubusercontent.com/.../backend/.env` → **HTTP 404**;
+  the published `docker-compose.yml` contains **0** occurrences of the old secret.
+- Rotation proven effective, not assumed: a token freshly signed by the API → `GET /auth/me`
+  **200**; a token hand-signed with the old `dev-secret-change-in-production` → **401**.
+- Both servers restarted and healthy: backend `/health` 200, frontend `/login` and `/trades`
+  200. Real data intact: 16 trades, 2 accounts. The 3 `@claude-test.local` users created
+  during C2/C10/C11 verification were deleted.
+
+**Backup:** `/tmp/tradejournal-backup-20260805-105137.bundle` (141 MB) holds the complete
+pre-rewrite history. Recover with `git clone <bundle>`. Delete it once you are satisfied —
+note it still contains the old secret.
+
+**Caveat:** GitHub may keep the pre-rewrite objects reachable by direct commit SHA in its cache
+for some time. The secret they contain is dead, but ask GitHub Support to run a GC if you want
+them unreachable.
 
 ---
 
