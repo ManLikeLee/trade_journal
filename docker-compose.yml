@@ -35,7 +35,9 @@ services:
       - '4000:4000'
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tradejournal?schema=public
-      JWT_SECRET: dev-secret-change-in-production
+      # Never hardcode a secret here — this file is committed. Compose fails fast
+      # if JWT_SECRET is not supplied by the environment or a local .env file.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (see backend/.env.example)}
       FRONTEND_URL: http://localhost:3000
       NODE_ENV: development
     depends_on:
