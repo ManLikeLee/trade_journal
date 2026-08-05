@@ -6,15 +6,16 @@ import { ThemeProvider } from '@/components/theme/theme-provider';
 import { useAuthStore } from '@/lib/auth';
 
 /**
- * Runs validateSession() once on app mount.
+ * Runs bootstrap() once on app mount: restores the session from the httpOnly
+ * refresh cookie, since the access token is memory-only and gone after a reload.
  * This sets checkingAuth:false so the login page can render the form
  * (or redirect if the session is still valid).
  */
 function AuthSessionValidator() {
-  const validateSession = useAuthStore((s) => s.validateSession);
+  const bootstrap = useAuthStore((s) => s.bootstrap);
   useEffect(() => {
-    validateSession();
-    // Only run once on mount — validateSession is stable
+    bootstrap();
+    // Only run once on mount — bootstrap is stable and de-duplicates internally
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return null;

@@ -36,7 +36,7 @@ export async function register(input: RegisterInput) {
     select: { id: true, email: true, name: true },
   });
 
-  return issueTokens(user.id, { email: user.email });
+  return { ...(await issueTokens(user.id, { email: user.email })), user };
 }
 
 export async function login(input: LoginInput) {
@@ -55,9 +55,16 @@ export async function login(input: LoginInput) {
 
   if (!user || !valid) throw new UnauthorizedError('Invalid credentials');
 
-  return issueTokens(user.id, { email: user.email });
+  return { ...(await issueTokens(user.id, { email: user.email })), user };
 }
 
+/**
+ * Rotate a refresh token.
+ *
+ * Returns the user alongside the tokens so a page reload — which has no access
+ * token, because it is now held in memory only — can restore the session in one
+ * round trip instead of refresh-then-fetch-profile.
+ */
 export async function refresh(rawToken: string) {
   const session = await prisma.session.findUnique({
     where: { refreshToken: rawToken },
@@ -70,7 +77,8 @@ export async function refresh(rawToken: string) {
   }
   // Rotate: delete old, issue new
   await prisma.session.delete({ where: { id: session.id } });
-  return issueTokens(session.userId, { email: session.user.email });
+  const tokens = await issueTokens(session.userId, { email: session.user.email });
+  return { ...tokens, user: await getMe(session.userId) };
 }
 
 export async function logout(rawToken: string) {

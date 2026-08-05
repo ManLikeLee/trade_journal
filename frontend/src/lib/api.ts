@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getAccessToken } from './access-token';
 
 function normalizeBaseUrl(raw?: string) {
   const value = (raw ?? '').trim();
@@ -10,27 +11,27 @@ const primaryBaseUrl = normalizeBaseUrl(
   process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:5000/api',
 );
 
-const localhostFallbackBaseUrl = primaryBaseUrl.includes('://localhost:')
-  ? primaryBaseUrl.replace('://localhost:', '://127.0.0.1:')
-  : null;
-
 export const api = axios.create({
   baseURL: primaryBaseUrl,
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
+  // Required for the httpOnly refresh cookie to be sent with /auth/refresh and
+  // /auth/logout. The API sets Access-Control-Allow-Credentials and names the
+  // origin explicitly, which credentialed CORS requires.
+  //
+  // ⚠️ The cookie is SameSite=Strict, so the browser only attaches it when the
+  // page and the API are the same *site*. Serve the app from 127.0.0.1:3000
+  // while the API is on 127.0.0.1:5000 and they match; open it on
+  // localhost:3000 and every refresh silently 401s. middleware.ts redirects to
+  // the canonical host to stop that happening by accident.
+  withCredentials: true,
 });
 
 // Attach access token to every request
 api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const raw = localStorage.getItem('tradejournal-auth');
-    if (!raw) return config;
-    try {
-      const parsed = JSON.parse(raw);
-      const token = parsed?.state?.accessToken;
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch {}
-  }
+  // Read from memory, not localStorage: the token is deliberately not persisted.
+  const token = getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -48,15 +49,9 @@ api.interceptors.response.use(
     const url = String(original?.url ?? '');
 
     // Never try to refresh a failed refresh request; that causes a deadlock.
-    if (url.includes('/auth/refresh')) {
+    // /auth/logout is excluded for the same reason — a 401 there is terminal.
+    if (url.includes('/auth/refresh') || url.includes('/auth/logout')) {
       return Promise.reject(error);
-    }
-
-    // Network-level failure (no HTTP response). Retry once via localhost fallback.
-    if (!error.response && original && !original._baseRetry && localhostFallbackBaseUrl) {
-      original._baseRetry = true;
-      original.baseURL = localhostFallbackBaseUrl;
-      return api(original);
     }
 
     if (error.response?.status === 401 && !original?._retry) {

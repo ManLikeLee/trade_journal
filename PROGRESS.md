@@ -26,8 +26,10 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
       *Done 2026-08-05. 30 unpriced trades: old code claimed a 30-loss streak, new reports none.*
 - [ ] **C5** — Fix deployment: `HOST=0.0.0.0`, `CMD ["node","dist/server.js"]`, align
       PORT/EXPOSE/compose, add `output:'standalone'`, create `public/`, add `.dockerignore`.
-- [ ] **C6** — Move refresh token to an `httpOnly; Secure; SameSite=Strict` cookie; access
+- [x] **C6** — Move refresh token to an `httpOnly; Secure; SameSite=Strict` cookie; access
       token in memory only; add CSP.
+      *Done 2026-08-05. **CSP is report-only and still needs nonces before enforcing** — see log.
+      **The app must be opened on `http://127.0.0.1:3000`**, not localhost (middleware redirects).*
 - [x] **C7** — Stop leaking `apiKey`: explicit `select` on `getTrade` and `listAccounts`;
       show the key once on create/regenerate.
       *Done 2026-08-05. Verified live: apiKey absent from every read endpoint.
@@ -570,6 +572,77 @@ Everything else left at helmet's defaults: `X-Content-Type-Options: nosniff`,
 
 **Deferred:** 2 items added.
 
+### 2026-08-05 — C6: httpOnly refresh cookie, memory-only access token, CSP
+
+**New dependency:** `cookie-parser@1.4.7` (+ types). Express 4 has no built-in cookie reader.
+
+**Three blockers found while planning, all real:**
+
+1. **`SameSite=Strict` cannot work across `localhost` and `127.0.0.1`** — they share no
+   registrable domain, so every request is cross-site and the browser drops the cookie
+   silently. The plan proposed moving the frontend to `localhost:5000`; that turned out to be
+   impossible because **macOS AirPlay Receiver owns `localhost:5000`** (`Server: AirTunes/770.8.1`
+   answered with a 403 — `localhost` resolves to `::1` first, and the API binds `127.0.0.1`).
+   Resolved the other way instead: **both sides on `127.0.0.1`**, which needs no port change and
+   no EA reconfiguration. `middleware.ts` now redirects `localhost` → `127.0.0.1` so the
+   mismatch cannot be hit by accident.
+2. **The Next middleware gate would have broken.** The refresh cookie is path-scoped to
+   `/api/auth`, so it is invisible at `/trades`. Added a second cookie, `tj_session`, at path
+   `/` holding `"1"` and no secret. It is httpOnly too — Next middleware reads the raw Cookie
+   header server-side, so JS still cannot see it.
+3. **React StrictMode would have caused a logout loop.** It double-invokes mount effects, so
+   bootstrap would fire two refreshes; the second presents an already-rotated token, 401s, and
+   clears the session. Solved with one module-scoped in-flight promise shared by *both* the
+   bootstrap and the interceptor path.
+
+**A fourth, caught during implementation:** `api.ts`'s request interceptor read the access token
+from `localStorage.getItem('tradejournal-auth')` — the persisted zustand blob. The moment tokens
+left storage, every request would have gone out with no `Authorization` header. Introduced
+`lib/access-token.ts`, a memory-only holder that `api.ts` reads and the store writes, which also
+removes the interceptor's coupling to persistence internals (an audit finding in its own right).
+
+**Backend:** `utils/cookies.ts` (set/clear/read helpers, attributes in one place); `auth.router.ts`
+sets the cookie and strips `refreshToken` from every response body — the service still returns it,
+so the module convention that services know nothing of HTTP is preserved; `/refresh` and `/logout`
+read the cookie **only**, never the body; `register`/`login`/`refresh` now return `user`, so a
+reload restores a session in one round trip.
+
+**Frontend:** tokens gone from zustand persistence entirely (the store is no longer persisted);
+`withCredentials: true`; `setAuthCookie`/`clearAuthCookie` deleted; `bootstrap()` replaces
+`validateSession()`; legacy `tradejournal-auth` localStorage and `tj-auth` cookie actively purged
+on load so a pre-migration token cannot linger for 30 days; localhost fallback retry removed;
+all 7 debug `console.log`s removed including the one printing the user's email.
+
+**Migration window: none, as recommended and agreed.** Keeping body-based refresh would preserve
+a path where JS can present the credential — the exact thing being removed. One forced re-login.
+
+**Verified end to end against the running API** (cookie jar, browser-equivalent):
+- **Login** → 200. `Set-Cookie: tj_refresh=…; Path=/api/auth; HttpOnly; Secure; SameSite=Strict`
+  and `tj_session=1; Path=/; HttpOnly; Secure; SameSite=Strict`. Body keys:
+  `accessToken, expiresIn, user` — **`refreshToken` ABSENT**.
+- **Reload → silent refresh** with no body, cookie only → 200, new access token, rotated cookie,
+  and the new token authenticates `GET /auth/me` (200).
+- **No cookie** → 401 `{"error":"No refresh token"}`.
+- **Logout** → 204, both cookies cleared with matching attributes (they must match or the browser
+  ignores the clear), session row deleted, and the old cookie then fails to refresh (401).
+- `Secure` **is** accepted over `http://127.0.0.1` — browsers treat loopback as trustworthy.
+- Headers on the app confirmed live: `Content-Security-Policy-Report-Only`,
+  `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`.
+- `npx tsc --noEmit` exit 0 both packages; `/health` 200; `/login` 200.
+
+**⚠️ CSP is report-only and deliberately not enforced.** It will report exactly two violations,
+both expected: the inline theme script in `app/layout.tsx` (must run pre-paint to avoid a
+light/dark flash) and Next's own inline bootstrap (`self.__next_f.push`). Making them pass needs
+`'unsafe-inline'` on `script-src`, which materially weakens CSP against the very XSS this task
+defends against. The real fix is a per-request nonce in middleware or a SHA-256 hash of the theme
+script. **Do not promote this policy to enforcing until that lands** — it would advertise
+protection it does not provide.
+
+**Not verified:** the browser itself. DevTools checks are in the handover.
+
+**Deferred:** 2 items added.
+
 ---
 
 ## Deferred
@@ -603,6 +676,13 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
   remotely reachable, and changing it means altering the Postgres role and updating `.env`
   together. Worth doing if that database is ever exposed beyond this machine.
+- **CSP needs nonces before it can be enforced.** Currently report-only with `'unsafe-inline'`
+  on `script-src`. Needs a per-request nonce issued in `middleware.ts` and threaded through
+  Next's script tags, or a SHA-256 hash of the theme init script, then flip the header name to
+  `Content-Security-Policy`.
+- **Password change does not invalidate outstanding sessions** (there is no password-change
+  endpoint yet). When H7 adds one, it must delete every `sessions` row for that user, or a
+  stolen refresh token survives the password change — the scenario the audit calls out.
 - **Rate-limit counters are in-memory and per-process.** Documented at the top of
   `rateLimit.ts` with a TODO. Redis is already provisioned in docker-compose and unused. Must
   land before a second instance runs, or every limit silently doubles.

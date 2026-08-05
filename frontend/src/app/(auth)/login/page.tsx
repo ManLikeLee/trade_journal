@@ -34,18 +34,10 @@ function LoginForm() {
   const [error, setError] = useState('');
 
   // ── Debug logs ────────────────────────────────────────────────────
-  useEffect(() => {
-    console.log('[Login] pathname:', pathname);
-    console.log('[Login] isAuthenticated:', isAuthenticated);
-    console.log('[Login] checkingAuth (overlay/loading mounted):', checkingAuth);
-    console.log('[Login] route is protected: false (public)');
-    console.log('[Login] redirect target after login:', from);
-  }, [pathname, isAuthenticated, checkingAuth, from]);
 
   // ── Auto-redirect if session is still valid ───────────────────────
   useEffect(() => {
     if (!checkingAuth && isAuthenticated) {
-      console.log('[Login] Session already valid — redirecting to:', from);
       router.replace(from);
     }
   }, [checkingAuth, isAuthenticated, from, router]);
@@ -60,10 +52,8 @@ function LoginForm() {
     setError('');
     try {
       await login(data.email, data.password);
-      console.log('[Login] Login successful — redirecting to:', from);
       router.push(from);
     } catch (e: any) {
-      console.error('[Login] Login error:', e);
       const backendMessage = e?.response?.data?.message;
       const networkMessage = !e?.response
         ? 'Cannot reach API server. Verify the backend is running.'

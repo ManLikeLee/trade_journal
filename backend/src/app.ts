@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { env } from './config/env';
 import { requestLogger } from './middleware/requestLogger';
 import { notFound, errorHandler } from './middleware/errorHandler';
@@ -70,6 +71,8 @@ app.use(
   }),
 );
 
+// Required to read the httpOnly refresh cookie; Express 4 has no built-in parser.
+app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
