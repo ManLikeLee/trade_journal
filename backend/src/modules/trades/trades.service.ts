@@ -70,8 +70,21 @@ function isClosedTrade(exitPrice?: number | null, closeTime?: Date | string | nu
   return exitPrice != null || closeTime != null;
 }
 
+/** Fields of an account that are safe to return to a client. Excludes apiKey. */
+const ACCOUNT_SAFE_SELECT = {
+  id: true,
+  name: true,
+  broker: true,
+  currency: true,
+  platform: true,
+} as const;
+
 async function assertAccountOwner(userId: string, accountId: string) {
-  const account = await prisma.account.findUnique({ where: { id: accountId } });
+  // Only the fields the callers use; the apiKey is never fetched here.
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    select: { id: true, userId: true, currency: true },
+  });
   if (!account) throw new NotFoundError('Account not found');
   if (account.userId !== userId) throw new ForbiddenError();
   return account;
@@ -174,7 +187,9 @@ export async function listTrades(userId: string, query: TradesQuery) {
 export async function getTrade(userId: string, tradeId: string) {
   const trade = await prisma.trade.findUnique({
     where: { id: tradeId },
-    include: { account: true, ...TRADE_INCLUDE },
+    // Never `account: true` here — that returned the whole row including the
+    // plaintext apiKey on every single-trade fetch. Only what the UI renders.
+    include: { account: { select: ACCOUNT_SAFE_SELECT }, ...TRADE_INCLUDE },
   });
   if (!trade) throw new NotFoundError('Trade not found');
   await assertAccountOwner(userId, trade.accountId);
@@ -381,5 +396,10 @@ export async function syncTrade(
 // Validate accountId ownership from apiKey (called by mt-sync router)
 export async function getAccountByApiKey(apiKey: string) {
   if (!apiKey) return null;
-  return prisma.account.findFirst({ where: { apiKey } });
+  // Matches on the key but does not return it — the caller only needs identity
+  // and currency.
+  return prisma.account.findFirst({
+    where: { apiKey },
+    select: { id: true, userId: true, currency: true },
+  });
 }

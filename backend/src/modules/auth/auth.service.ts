@@ -11,6 +11,7 @@ const REFRESH_TTL_DAYS = 30;
 export async function register(input: RegisterInput) {
   const exists = await prisma.user.findUnique({
     where: { email: input.email.toLowerCase() },
+    select: { id: true }, // existence check only — do not fetch the password hash
   });
   if (exists) throw new ConflictError('Email already in use');
 
@@ -42,7 +43,9 @@ export async function login(input: LoginInput) {
 export async function refresh(rawToken: string) {
   const session = await prisma.session.findUnique({
     where: { refreshToken: rawToken },
-    include: { user: true },
+    // Only the email is used below. `include: { user: true }` pulled the whole
+    // user row, password hash included, on every token refresh.
+    select: { id: true, userId: true, expiresAt: true, user: { select: { email: true } } },
   });
   if (!session || session.expiresAt < new Date()) {
     throw new UnauthorizedError('Refresh token expired or invalid');

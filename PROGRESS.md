@@ -28,8 +28,10 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
       PORT/EXPOSE/compose, add `output:'standalone'`, create `public/`, add `.dockerignore`.
 - [ ] **C6** — Move refresh token to an `httpOnly; Secure; SameSite=Strict` cookie; access
       token in memory only; add CSP.
-- [ ] **C7** — Stop leaking `apiKey`: explicit `select` on `getTrade` and `listAccounts`;
+- [x] **C7** — Stop leaking `apiKey`: explicit `select` on `getTrade` and `listAccounts`;
       show the key once on create/regenerate.
+      *Done 2026-08-05. Verified live: apiKey absent from every read endpoint.
+      **Keys are still plaintext at rest — that is C9, still outstanding.***
 - [ ] **C8** — Add rate limiting on auth and sync endpoints.
 - [ ] **C9** — Hash refresh tokens and API keys at rest (SHA-256); unique index on the hash.
 - [x] **C10** — Whitelist `sortBy` as a Zod enum on both ends; make `duration` non-sortable.
@@ -429,6 +431,76 @@ visual check.
 
 **Deferred:** 2 items added.
 
+### 2026-08-05 — C7: stop returning apiKey; reveal-once pattern
+
+**Changed:**
+- `accounts.service.ts` — the fix is enforced by **types, not discipline**. Every function
+  returns `PublicAccount`, an interface with no `apiKey` field; only `createAccount` and
+  `regenerateApiKey` return `AccountWithSecret`. A single `toPublicAccount()` mapper is the one
+  exit point for an account row, replacing the key with `hasApiKey` and `apiKeyLast4`. Adding a
+  new account endpoint cannot leak the key by omission — it would not compile.
+- `trades.service.ts` — `getTrade`'s `include: { account: true }` replaced with an explicit
+  select of `id, name, broker, currency, platform` (the fields the detail and edit pages
+  render). `assertAccountOwner` and `getAccountByApiKey` narrowed to the fields their callers
+  use, so the key is not even fetched on those paths.
+- `auth.service.ts` — two further over-fetches closed: the registration existence check pulled
+  the whole user row including `passwordHash` for a truthiness test, and `refresh` used
+  `include: { user: true }` to read one email, fetching the password hash on **every token
+  refresh**. Neither reached a client, but neither should have been read.
+- `settings/page.tsx` — the show/hide toggle and copy button over `account.apiKey` are gone,
+  because the field no longer exists in list responses. The card shows `••••…last4`. A new key
+  is surfaced once, on create and on regenerate, in a `RevealOnceKey` panel with a copy button
+  and "copy this now — it will not be shown again". Regeneration now requires confirmation
+  naming the consequence (the running EA stops syncing), and the mutation finally has error
+  handling — it had none, so failures were silent. The create form's error handler read
+  `data.message`, which the API never returns; it now reads `data.error` first.
+- The in-app EA snippet no longer interpolates a key it cannot have.
+
+**Over-fetch audit (item 6) — every Prisma read, and what it returns:**
+
+| Query | Before | Now |
+|---|---|---|
+| `listAccounts` | whole row, **apiKey included** | mapped, masked |
+| `getAccount` / `updateAccount` | whole row, **apiKey included** | mapped, masked |
+| `createAccount` / `regenerateApiKey` | whole row | mapped + key (intended, reveal-once) |
+| `deleteAccount` | returned the deleted row | returns `void`; router already 204s |
+| `getTrade` | `account: true` → **whole account row** | 5-field select |
+| `assertAccountOwner` | whole account row | `id, userId, currency` |
+| `getAccountByApiKey` | whole account row | `id, userId, currency` |
+| `auth.register` existence check | whole user row incl. `passwordHash` | `id` only |
+| `auth.refresh` | `include: { user: true }` incl. `passwordHash` | `user: { email }` |
+| `auth.login` | whole user row | unchanged — `passwordHash` is needed for bcrypt, and the row is never returned |
+| `getMe`, `user.create` | already had a `select` | unchanged |
+| `listTrades`, `analytics`, `insights` | trades + `TRADE_INCLUDE` | unchanged — no account relation, so no key; the notes/tags over-fetch on list pages is a **performance** issue left for M7 |
+
+**Verified live — exact response shapes, recursively scanned for an `apiKey` key at any depth:**
+
+| Endpoint | apiKey present? |
+|---|---|
+| `GET /api/accounts` | **NONE** ✅ — `hasApiKey: true, apiKeyLast4: "13a0"` |
+| `GET /api/accounts/:id` | **NONE** ✅ |
+| `PATCH /api/accounts/:id` | **NONE** ✅ |
+| `GET /api/trades/:id` | **NONE** ✅ — `account` keys: `broker, currency, id, name, platform` |
+| `GET /api/trades` | **NONE** ✅ — no `account` relation at all |
+| `POST /api/accounts` | present — **intended**, reveal-once |
+| `POST /api/accounts/:id/regenerate-api-key` | present — **intended**, reveal-once |
+
+Rotation still works end to end: the new key authenticates `POST /api/mt-sync/trades` (200)
+and the old one is rejected (401). Auth flows re-checked after the narrowing —
+register → `/auth/me` → refresh → refreshed token → login all pass.
+`npx tsc --noEmit` exit 0 in both packages. Test users deleted; 19 trades, 2 accounts intact.
+
+**Still outstanding — C9.** The key remains **plaintext in `accounts.api_key`**, and refresh
+tokens are plaintext in `sessions.refresh_token`. C7 closes the API surface; a database dump,
+leaked backup or over-permissive read role still yields every key. C9 hashes both at rest with
+a unique index on the hash. `apiKeyLast4` is derived from the plaintext today and will need to
+become a stored column when C9 lands.
+
+**Not verified:** the browser. The masked card, the confirmation dialog, the reveal-once panel
+and the create flow need a visual check.
+
+**Deferred:** 1 item added.
+
 ---
 
 ## Deferred
@@ -462,6 +534,9 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
   remotely reachable, and changing it means altering the Postgres role and updating `.env`
   together. Worth doing if that database is ever exposed beyond this machine.
+- **`GET /api/accounts` still returns `userId` and `initialBalance`** to the client. Neither is
+  secret and `initialBalance` will be needed for drawdown anchoring (M9), but `userId` is
+  redundant — the caller is that user. Trim when the account response shape is next revisited.
 - **The dashboard does not yet surface `unpricedTrades`.** The API now returns it and the
   frontend type carries it, but no component renders it. Until it does, a user with unpriced
   trades sees `totalTrades` and the money figures without being told the two cover different
