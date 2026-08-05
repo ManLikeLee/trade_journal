@@ -32,7 +32,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
       show the key once on create/regenerate.
       *Done 2026-08-05. Verified live: apiKey absent from every read endpoint.
       **Keys are still plaintext at rest — that is C9, still outstanding.***
-- [ ] **C8** — Add rate limiting on auth and sync endpoints.
+- [x] **C8** — Add rate limiting on auth and sync endpoints.
+      *Done 2026-08-05. Verified live: login 6th attempt → 429 + Retry-After. Helmet added,
+      login timing side channel closed.*
 - [ ] **C9** — Hash refresh tokens and API keys at rest (SHA-256); unique index on the hash.
 - [x] **C10** — Whitelist `sortBy` as a Zod enum on both ends; make `duration` non-sortable.
       Clicking the Duration column header currently returns 500.
@@ -501,6 +503,73 @@ and the create flow need a visual check.
 
 **Deferred:** 1 item added.
 
+### 2026-08-05 — C8: rate limiting, helmet, login timing side channel
+
+**New dependencies** (approved in the task): `express-rate-limit@8.6.2`, `helmet@8.3.0`.
+
+**New:** `backend/src/middleware/rateLimit.ts`; `TooManyRequestsError` (429) in `utils/errors.ts`.
+
+| Route | Limit | Key |
+|---|---|---|
+| `POST /auth/login` | 5 / 15 min | IP + normalised email |
+| `POST /auth/register` | 3 / hour | IP |
+| `POST /auth/refresh` | 30 / 15 min | IP |
+| `POST /mt-sync/trades` | 100 / min | API key |
+| ↳ failed key attempts | 10 / 15 min | IP, counted only after rejection |
+| `/api/*` backstop | 300 / min | IP |
+
+Login is keyed on IP **and** email deliberately: IP alone punishes everyone behind a shared
+NAT when one person fumbles a password; email alone lets an attacker lock a user out of their
+own account. `ipKeyGenerator` normalises IPv6 to a /56 so an attacker with an allocation
+cannot cycle addresses for free.
+
+**Two bugs I introduced and caught by testing, not by reading:**
+
+1. *The guess limiter locked out legitimate EAs.* Mounted as ordinary middleware it ran
+   **before** the key lookup, so ten wrong guesses from one address blocked every valid key
+   sharing that address for 15 minutes — an attacker on a shared NAT could silently stop a
+   stranger's trade sync. Proven live (valid key → 429). Now invoked manually from the handler
+   *after* a key has been rejected, so a correct key never touches the counter.
+2. *That fix silently disabled the limiter.* The callback passed to the limiter ignored its
+   argument, so when the limiter signalled "over budget" by calling back with a
+   `TooManyRequestsError`, it was discarded and re-raised as a 401. Twelve wrong keys all
+   returned 401 and no 429 ever fired. Only visible because the output was checked.
+
+**Also fixed (item 5):** `login` returned early when no user matched, skipping bcrypt, so
+"unknown email" answered in ~1 ms against ~250 ms for "wrong password" — a clean oracle for
+which addresses hold accounts. It now always performs one comparison, against a dummy hash
+computed once at startup. Measured: **504 ms vs 554 ms**, a difference inside run-to-run
+variance, against a ~5000× gap before.
+
+**Helmet (item 6)** configured explicitly; two defaults overridden:
+- `crossOriginResourcePolicy: 'cross-origin'` — the default `same-origin` would have blocked
+  the browser from reading these responses, since the frontend is on `localhost:3000` and the
+  API on `127.0.0.1:5000`. CORS still governs who may call the API.
+- `contentSecurityPolicy` with `useDefaults: false` — helmet's default policy describes HTML
+  resources this API never serves. Replaced with `default-src 'none'; frame-ancestors 'none';
+  base-uri 'none'; form-action 'none'`. My first attempt left `useDefaults` on, which *merged*
+  with the defaults and produced a policy that contradicted its own comment; caught by reading
+  the emitted header rather than the source.
+
+Everything else left at helmet's defaults: `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`,
+`Strict-Transport-Security` (a no-op over plain HTTP, correct the moment TLS is added),
+`Cross-Origin-Opener-Policy`, `Origin-Agent-Cluster`, and `X-Powered-By` removed.
+
+**Verified live:**
+- 10 rapid logins: attempts 1–5 → **401**; 6–10 → **429**, `Retry-After: 900`, body
+  `{"error":"Too many login attempts. Try again in 15 minutes."}` — the same `{ error }` shape
+  `errorHandler` produces for every other failure. `RateLimit` headers count down 4→0.
+- A **different email from the same IP** gets its own budget (5 fresh attempts) while the first
+  stays blocked — proving the composite key.
+- MT-sync: 10 invalid keys → 401, 11th–12th → **429 + Retry-After: 900**, and a **valid key
+  from the same IP still returns 200** with the guess budget exhausted.
+- `curl -I` shows all headers above; `X-Powered-By` absent.
+- `npx tsc --noEmit` exit 0 both packages. Test users deleted; no test artefacts left in real
+  accounts (the 20th trade is a genuine XAUUSD sync from the live EA at 18:20).
+
+**Deferred:** 2 items added.
+
 ---
 
 ## Deferred
@@ -534,6 +603,11 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
   remotely reachable, and changing it means altering the Postgres role and updating `.env`
   together. Worth doing if that database is ever exposed beyond this machine.
+- **Rate-limit counters are in-memory and per-process.** Documented at the top of
+  `rateLimit.ts` with a TODO. Redis is already provisioned in docker-compose and unused. Must
+  land before a second instance runs, or every limit silently doubles.
+- **`trust proxy` is unset.** Correct today (no proxy), but behind one every request would
+  carry the proxy's IP and each per-IP limit would become a single global limit.
 - **`GET /api/accounts` still returns `userId` and `initialBalance`** to the client. Neither is
   secret and `initialBalance` will be needed for drawdown anchoring (M9), but `userId` is
   redundant — the caller is that user. Trim when the account response shape is next revisited.

@@ -5,8 +5,19 @@ import { env } from '../../config/env';
 import { ConflictError, UnauthorizedError } from '../../utils/errors';
 import type { RegisterInput, LoginInput } from './auth.schema';
 
+// Deliberately expensive: ~250 ms per hash. Do not lower it — the denial-of-
+// service that cost enables is mitigated by rate limiting (middleware/rateLimit.ts),
+// not by making password cracking cheaper.
 const SALT_ROUNDS = 12;
 const REFRESH_TTL_DAYS = 30;
+
+/**
+ * A real bcrypt hash at the same cost, compared against when no user matches, so
+ * that a failed login takes the same time whether or not the email exists.
+ * Computed once at startup (~250 ms) rather than hardcoded, so it stays in step
+ * with SALT_ROUNDS. It is not a credential: nothing can authenticate against it.
+ */
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('login-timing-equaliser', SALT_ROUNDS);
 
 export async function register(input: RegisterInput) {
   const exists = await prisma.user.findUnique({
@@ -32,10 +43,17 @@ export async function login(input: LoginInput) {
   const user = await prisma.user.findUnique({
     where: { email: input.email.toLowerCase() },
   });
-  if (!user) throw new UnauthorizedError('Invalid credentials');
 
-  const valid = await bcrypt.compare(input.password, user.passwordHash);
-  if (!valid) throw new UnauthorizedError('Invalid credentials');
+  // Both branches must perform one bcrypt comparison.
+  //
+  // Returning early on an unknown email skipped bcrypt entirely, so "no such
+  // user" answered in ~1 ms while "wrong password" took ~250 ms. That gap is
+  // trivially measurable and turns the login endpoint into an oracle for which
+  // email addresses hold accounts. Comparing against a dummy hash of the same
+  // cost keeps the two paths indistinguishable in time.
+  const valid = await bcrypt.compare(input.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+
+  if (!user || !valid) throw new UnauthorizedError('Invalid credentials');
 
   return issueTokens(user.id, { email: user.email });
 }

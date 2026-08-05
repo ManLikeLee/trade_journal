@@ -236,6 +236,29 @@ keys are internal, so this is cosmetic, but do not read the hook name as the pat
 `POST /api/mt-sync/trades` takes a **batch envelope**, not a single trade:
 `{ accountNumber, platform: 'MT4'|'MT5', trades: [...] }` — see `mt-sync.schema.ts`.
 
+## Rate limiting and security headers
+
+`middleware/rateLimit.ts` (express-rate-limit) and `helmet` in `app.ts`.
+
+| Route | Limit | Key |
+|---|---|---|
+| `POST /api/auth/login` | 5 / 15 min | IP **+** normalised email |
+| `POST /api/auth/register` | 3 / hour | IP |
+| `POST /api/auth/refresh` | 30 / 15 min | IP |
+| `POST /api/mt-sync/trades` | 100 / min | API key |
+| ↳ failed key attempts | 10 / 15 min | IP — applied **only after** a key is rejected |
+| everything under `/api` | 300 / min | IP (loose backstop) |
+
+429s route through `errorHandler`, so the body is `{ "error": "…" }` like every other error,
+with `Retry-After` and draft-7 `RateLimit` headers.
+
+**⚠️ The store is in-memory, therefore per-process.** Running a second instance doubles every
+limit. Move to Redis (already in docker-compose, unused) before scaling out.
+
+`bcrypt` cost stays at **12**. It is the reason ~20 concurrent logins can stall the event loop,
+and rate limiting is the mitigation — do not lower it. `login` always runs one bcrypt compare,
+against a dummy hash when the email is unknown, so timing cannot be used to enumerate accounts.
+
 ## ⚠️ The API contract is hand-maintained on both sides
 
 There is **no shared package, no OpenAPI spec, no generated client**. The frontend and the

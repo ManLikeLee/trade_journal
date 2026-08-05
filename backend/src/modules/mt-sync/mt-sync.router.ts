@@ -2,8 +2,25 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { UnauthorizedError } from '../../utils/errors';
 import { MtSyncPayloadSchema } from './mt-sync.schema';
 import { getAccountByApiKey, syncTrade } from '../trades/trades.service';
+import { mtSyncKeyLimiter, mtSyncGuessLimiter } from '../../middleware/rateLimit';
 
 export const mtSyncRouter = Router();
+
+/**
+ * Count a failed authentication against the per-IP guess limit, then reject.
+ *
+ * If the caller is already over the limit the limiter responds with 429 itself;
+ * otherwise it increments and we fall through to the normal 401.
+ */
+function rejectInvalidKey(req: Request, res: Response, next: NextFunction, message: string) {
+  mtSyncGuessLimiter(req, res, ((err?: unknown) => {
+    // The limiter signals "over budget" by calling this callback with a
+    // TooManyRequestsError. Forward it — swallowing the argument here turned
+    // every 429 back into a 401 and silently disabled the guess limit.
+    if (err) return next(err);
+    next(new UnauthorizedError(message));
+  }) as NextFunction);
+}
 
 /**
  * POST /api/mt-sync/trades
@@ -14,15 +31,19 @@ export const mtSyncRouter = Router();
  * Returns:
  *   { success: true, created: number, updated: number, skipped: number }
  */
-mtSyncRouter.post('/trades', async (req: Request, res: Response, next: NextFunction) => {
+// Only the per-key limiter runs up front. The guess limiter is applied inside
+// the handler, after a key has actually been rejected — see rejectInvalidKey.
+mtSyncRouter.post('/trades', mtSyncKeyLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const apiKey = req.headers['x-api-key'];
     if (!apiKey || typeof apiKey !== 'string') {
-      throw new UnauthorizedError('Missing x-api-key header');
+      return rejectInvalidKey(req, res, next, 'Missing x-api-key header');
     }
 
     const account = await getAccountByApiKey(apiKey);
-    if (!account) throw new UnauthorizedError('Invalid API key');
+    if (!account) {
+      return rejectInvalidKey(req, res, next, 'Invalid API key');
+    }
 
     const payload = MtSyncPayloadSchema.parse(req.body);
 
