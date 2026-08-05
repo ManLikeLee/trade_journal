@@ -28,7 +28,17 @@ const schema = z.object({
   swap:       z.coerce.number().default(0),
   // Optional override. Used when the app cannot estimate P&L for a symbol, and
   // whenever the trader prefers the broker's own figure.
-  pnl:        z.coerce.number().optional().or(z.literal('')),
+  //
+  // Blank must become undefined BEFORE coercion. `z.coerce.number()` turns ''
+  // into 0, which is a valid number, so `.optional().or(z.literal(''))` never
+  // reaches its fallback and an untouched field submits pnl: 0 — which the
+  // backend then honours as an explicit breakeven, overwriting the calculated
+  // value. The other optional numbers escape this only because `.positive()`
+  // rejects the coerced 0. An explicitly typed 0 still means breakeven.
+  pnl: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? undefined : v),
+    z.coerce.number().optional(),
+  ),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -97,9 +107,9 @@ export function TradeForm({ defaultValues, mode = 'create' }: TradeFormProps) {
         // datetime-local values carry no offset; the API requires full ISO 8601.
         openTime: datetimeLocalToIso(data.openTime),
         closeTime: datetimeLocalToIso(data.closeTime),
-        // Sent only when the trader supplied one — otherwise the backend
-        // calculates it, and an empty string would be coerced to 0.
-        pnl: data.pnl === '' || data.pnl == null ? undefined : data.pnl,
+        // undefined unless the trader actually typed one — the schema's
+        // preprocess step guarantees a blank field never arrives here as 0.
+        pnl: data.pnl,
       });
       router.push('/trades');
     } catch (e: any) {

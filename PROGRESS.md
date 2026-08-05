@@ -293,6 +293,42 @@ message need a visual check — click-path handed over.
 
 **Deferred:** 3 items added.
 
+### 2026-08-05 — C3 follow-up: blank Realised P&L submitted 0, overriding the calculation
+
+**Reported by the user:** an XAUUSD 0.1-lot trade previewing +$43.00 saved as **0.00**, and a
+GER40 trade that correctly said "can't estimate" also saved as **0.00** instead of null.
+
+**Root cause — a bug introduced by C3, in the field C3 added.** `TradeForm`'s new optional
+`pnl` was `z.coerce.number().optional().or(z.literal(''))`. `z.coerce.number()` turns `''` into
+`0`, which is a valid number, so the `.or(z.literal(''))` fallback was never reached and an
+untouched field submitted `pnl: 0` on every save. The backend then correctly applied its
+precedence rule — a supplied pnl wins — and stored 0.00, overwriting the calculated 43.00 and
+converting GER40's intended null into a fabricated breakeven. The submit-time guard checked for
+`''` and `null` but not for the number `0`, so it never fired.
+
+The form's other optional numbers (`exitPrice`, `stopLoss`, `takeProfit`) escape this only by
+accident: `.positive()` rejects the coerced `0`, so they do fall through to the `''` branch.
+Proven by running both field definitions side by side: `parse('')` → `0` for pnl, `''` for
+exitPrice.
+
+**Fixed** with a `z.preprocess` that maps blank/null/undefined to `undefined` *before*
+coercion. A deliberately typed `0` still means breakeven and is still sent.
+
+**Verified live, all five paths:** `pnl: 0` sent → stores 0 (bug reproduced); pnl omitted →
+**43**; GER40 → **null**; GER40 with a typed −45.26 → **−45.26**; a deliberate 0 → **0**.
+Schema unit-checked for `''`/null/undefined/'43'/'0'/'-12.5'. Both typechecks exit 0.
+
+**Contract size challenged and checked.** The user reported MT5 giving $40 gross for XAUUSD 0.1
+lots over a $5 move, implying a contract size of 80. Derived the implied contract size from
+their own closed gold trades instead — `(pnl − commission − swap) ÷ (move × lots × direction)`
+— across four real trades including a 0.1-lot one (4171.94 → 4171.80, gross −1.40):
+**every one implies exactly 100**. Table left unchanged; asked the user to confirm against
+MT5's symbol specification before altering it.
+
+**User action needed:** two hand-entered test trades are sitting in the real account with the
+bad `pnl = 0.00` (GER40 26214→26219 and XAUUSD 2400→2405). They will skew analytics until
+deleted or re-saved.
+
 ---
 
 ## Deferred
