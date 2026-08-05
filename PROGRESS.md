@@ -35,6 +35,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
       *Done 2026-08-04 — verified live against the running API, 500 → 400 → UI can't send it.*
 - [ ] **C11** — Purge `.env`, `backend/dist/`, `frontend/.next/` from git; add `.env*` to
       `.gitignore`; rotate any exposed value.
+      *Phase A done + JWT_SECRET rotated (2026-08-05). **Phase B — history rewrite and
+      force-push — awaiting explicit approval.** Until then `.git` stays at 207 MB and the old
+      secret remains readable in the public repo's history.*
 - [ ] **C12** — Add CI (`tsc --noEmit` + lint + tests on PR) and an ESLint config.
 
 ## HIGH
@@ -146,6 +149,42 @@ chevron, and rows should keep the server's order when paging. Click-path below.
 
 **Deferred:** 2 items added.
 
+### 2026-08-05 — C11 Phase A: untrack build output and env files; rotate JWT_SECRET
+
+**Context found first:** the GitHub repo `ManLikeLee/trade_journal` is **public** (0 forks) and
+`backend/.env` was committed to it, so `JWT_SECRET` — a 31-character placeholder beginning
+`dev` — was world-readable and is the key the running API signs access tokens with. Git
+history was measured rather than assumed: of 207 MB of `.git`, **`frontend/.next` accounts for
+198.3 MB**, `backend/dist` 0.8 MB, and *all source across all history* 1.7 MB.
+
+**Changed:**
+- `.gitignore` — rewrote. It covered neither `.env` nor `.env.local`, so the next secret
+  committed would also have been published; `frontend/.next/` and `backend/dist/` were listed
+  but had no effect because both were already tracked. Now `.env` + `.env.*` with a `!` negation
+  keeping the `.env.example` templates tracked, plus `frontend/out/`, `.DS_Store`, `*.log`.
+- `git rm -r --cached` on `backend/.env`, `frontend/.env.local`, `backend/dist` (103 files),
+  `frontend/.next` (132 files) — 238 deletions from the index, working copies left in place so
+  the app keeps running.
+- `backend/dist` additionally deleted from disk: it is the *NestJS* build this project
+  replaced, including `websocket/trades.gateway.js` which has no source counterpart, and
+  `backend/Dockerfile` still points its CMD at that dead entry point.
+- `backend/.env` — `JWT_SECRET` rotated to 64 random chars (384 bits) from
+  `crypto.randomBytes(48)`. Previous file saved to `backend/.env.c11-backup`, which the new
+  ignore rules already cover (verified with `git check-ignore`).
+
+**Verified:** 0 unexpected paths in the 238 staged deletions (filtered the diff to prove only
+`backend/dist/`, `frontend/.next/`, `backend/.env`, `frontend/.env.local` were touched); 58
+source files under `backend/src` + `frontend/src` still tracked; both `.env.example` templates
+still tracked; `backend/.env` and `frontend/.env.local` still present on disk; `GET /health`
+still 200; working tree clean afterwards.
+
+**Not yet done — Phase B.** `.git` is still 207 MB and the old secret is still readable in the
+public repo's history. Both require a history rewrite + force-push, which is destructive and
+outward-facing, so it is held pending explicit approval. A full backup bundle of every ref was
+written to `/tmp/tradejournal-backup-20260805-105137.bundle` (141 MB) beforehand.
+
+**Deferred:** 1 item added (Postgres password).
+
 ---
 
 ## Deferred
@@ -175,6 +214,10 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   places (crypto, some indices) makes the field invalid and the browser silently refuses to
   submit — no error text, since these fields render none. Ties into the audit's crypto-precision
   finding and H11.
+- **The local Postgres password was also published** in the committed `backend/.env`
+  `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
+  remotely reachable, and changing it means altering the Postgres role and updating `.env`
+  together. Worth doing if that database is ever exposed beyond this machine.
 - **Analytics silently ignores an invalid `from`/`to` instead of rejecting it.** C10 fixed the
   trades query; `analytics.router.ts`'s own `QuerySchema` still declares `from`/`to` as bare
   `z.string().optional()`. It does not 500 — `analytics.service.ts:29` runs them through a
