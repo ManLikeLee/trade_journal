@@ -23,23 +23,6 @@ import type { NextRequest } from 'next/server';
 
 const PUBLIC_PATHS = ['/login', '/register'];
 
-/**
- * The refresh cookie is SameSite=Strict, so the browser attaches it only when
- * the page and the API are the same site. The API is on 127.0.0.1:5000; a page
- * opened on localhost:3000 is therefore cross-site and every silent refresh
- * fails, presenting as "logged out immediately after logging in".
- *
- * Redirecting to the canonical host makes that impossible to hit by accident.
- */
-function canonicalHostRedirect(request: NextRequest): NextResponse | null {
-  const host = request.nextUrl.hostname;
-  if (host !== 'localhost') return null;
-
-  const url = request.nextUrl.clone();
-  url.hostname = '127.0.0.1';
-  return NextResponse.redirect(url);
-}
-
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -47,9 +30,6 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith('/_next')) {
     return NextResponse.next();
   }
-
-  const redirect = canonicalHostRedirect(request);
-  if (redirect) return redirect;
 
   // Allow public routes through
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {

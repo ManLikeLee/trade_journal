@@ -639,6 +639,26 @@ defends against. The real fix is a per-request nonce in middleware or a SHA-256 
 script. **Do not promote this policy to enforcing until that lands** — it would advertise
 protection it does not provide.
 
+**Post-commit fix — infinite redirect loop (reported by the user).** Opening the app gave
+`ERR_TOO_MANY_REDIRECTS`: `/dashboard` → 307 → `/dashboard` forever.
+
+Cause: the canonical-host redirect I added to `middleware.ts` guarded on
+`request.nextUrl.hostname`, which in dev **always reports `localhost`** regardless of the Host
+header, so the guard never matched and every request redirected to itself. Reading the real
+`Host` header fixed the guard, but exposed a second problem: `NextResponse.redirect()` rewrites
+a Location it considers same-deployment back to a bare path, dropping the host change — so
+`localhost` still looped. Setting the `Location` header by hand on a raw `NextResponse` did not
+help; Next normalises it either way.
+
+**Resolution: the redirect cannot be done from middleware at all.** Removed it from
+`middleware.ts` and moved it into the browser (`providers.tsx`), where `location.replace()` is
+not rewritten by anything and cannot loop, because after it runs the hostname no longer matches.
+
+Verified: `127.0.0.1:3000/` and `localhost:3000/` both terminate in **3 hops**
+(`/` → `/dashboard` → `/login` → 200); `/login` 200; `/dashboard` without a cookie redirects to
+`/login?from=%2Fdashboard`; `/dashboard` **with** the `tj_session` cookie returns **200**,
+proving the hint cookie does its job.
+
 **Not verified:** the browser itself. DevTools checks are in the handover.
 
 **Deferred:** 2 items added.
