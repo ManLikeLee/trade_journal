@@ -14,8 +14,8 @@
  *   1. They are PER-PROCESS. Run two instances behind a load balancer and the
  *      effective limit doubles — an attacker simply spreads requests across
  *      them. This MUST move to a shared Redis store before running more than
- *      one instance. docker-compose.yml already provisions Redis; nothing
- *      references it yet.
+ *      one instance. (There is no Redis anywhere in this project now — the
+ *      compose file that declared one was deleted in C5 as it never worked.)
  *   2. They reset on restart, so a deploy clears every counter.
  *   3. Memory grows with the number of distinct keys until each window expires.
  *

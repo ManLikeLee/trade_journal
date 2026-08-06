@@ -24,8 +24,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
 - [x] **C4** — Fix null/zero handling in `analyzeStreaks`; unify null policy across
       `analytics.service.ts` and `insights.service.ts`. Depends on C3.
       *Done 2026-08-05. 30 unpriced trades: old code claimed a 30-loss streak, new reports none.*
-- [ ] **C5** — Fix deployment: `HOST=0.0.0.0`, `CMD ["node","dist/server.js"]`, align
-      PORT/EXPOSE/compose, add `output:'standalone'`, create `public/`, add `.dockerignore`.
+- [x] **C5** — Fix deployment. **Reshaped: no Docker.** The three broken Docker artifacts were
+      deleted rather than repaired; `HOST` is now configurable and `build && start` is verified
+      for both packages. *Done 2026-08-06.*
 - [x] **C6** — Move refresh token to an `httpOnly; Secure; SameSite=Strict` cookie; access
       token in memory only; add CSP.
       *Done 2026-08-05. **CSP is report-only and still needs nonces before enforcing** — see log.
@@ -851,6 +852,47 @@ npm ci     backend 0 | frontend 0        (CI uses npm ci, not npm install)
 
 **Deferred:** 2 items added.
 
+### 2026-08-06 — C5: deployable without Docker
+
+**The user does not want Docker in this project**, so the task was reshaped: rather than repair
+three artifacts that have never worked, delete them and verify the path that is actually used.
+
+**Deleted:** `backend/Dockerfile` (its `CMD` invoked `dist/src/main`, the entry point of the
+NestJS app this project replaced — the audit called it a live hazard), `frontend/Dockerfile`
+(copied `.next/standalone`, which is never produced, and a `public/` that does not exist — it
+could not build), `docker-compose.yml` (published 4000 against an app on 5000, and provisioned
+a Redis nothing references). The CI `docker` job went with them, so **CI is now three jobs, all
+blocking, no `continue-on-error`** — the caveat recorded in C12 is resolved.
+
+**The fix that actually mattered:** `server.ts` hardcoded `const HOST = '127.0.0.1'`. That is
+correct for local development and fatal on any platform that routes traffic into the process —
+Railway, Render, Fly, systemd behind nginx — with no way to override it. `HOST` is now an env
+var defaulting to loopback, so local stays safe and deployment is one variable away.
+
+Also fixed while in `server.ts`: shutdown closed the HTTP server but never called
+`prisma.$disconnect()`, leaking a Postgres connection on every restart — which matters most on
+exactly the platforms that restart on each deploy.
+
+**Verified by running it, not by reasoning about it:**
+
+| Check | Result |
+|---|---|
+| `backend npm run build` | exit 0, emits `dist/server.js` |
+| `node dist/server.js` (PORT=5099) | starts, `GET /health` → **200** |
+| `HOST=0.0.0.0` | binds `*:5099`, reachable on the LAN IP `172.20.10.2` → **200** |
+| SIGTERM | `shutting down gracefully` → `Server closed`, no hang |
+| `frontend npm run build` | exit 0, compiled successfully, 8 routes |
+| `next start` (PORT=3099) | ready in 692 ms, `GET /login` → **200**, CSP/HSTS/X-Frame headers present |
+
+The dev servers were stopped for the frontend production build (shared `.next`) and restarted
+afterwards; both confirmed healthy on 3000/5000.
+
+`tsc` 0 and `eslint` 0 errors in both packages. One error the new linter caught in my own
+change: `shutdown` was declared `async` with nothing to await — exactly the kind of thing C12
+exists to stop.
+
+**Deferred:** 1 item added.
+
 ---
 
 ## Deferred
@@ -884,6 +926,11 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
   remotely reachable, and changing it means altering the Postgres role and updating `.env`
   together. Worth doing if that database is ever exposed beyond this machine.
+- **No deployment target is configured.** C5 makes the app deployable — `HOST`, a working
+  `build && start`, no Docker — but nothing is actually deployed. The audit's showcase list
+  wants a live URL in the README. Railway or Render for the backend plus Vercel for the
+  frontend build from source and need no Docker; both need `HOST=0.0.0.0`, a managed Postgres
+  `DATABASE_URL`, a real `JWT_SECRET`, and `NEXT_PUBLIC_API_URL` pointing at the deployed API.
 - **One-shot Prettier format commit.** Config is in place but nothing is formatted;
   `prettier --check .` fails repo-wide. Run `npx prettier --write .` in its own commit, touching
   nothing else, so the reformat does not contaminate future diffs or `git blame`.

@@ -330,10 +330,26 @@ cd frontend
 npm run dev            # → http://localhost:3000
 ```
 
-Docker is **not** a working path today: `backend/Dockerfile` runs `node dist/src/main` (the
-deleted NestJS entry point), `server.ts` hard-binds `127.0.0.1`, compose publishes `4000`
-against an app on `5000`, and `frontend/Dockerfile` copies a `.next/standalone` output that is
-never produced. Fixing all of that is C5.
+### Production build — no Docker
+
+**This project does not use Docker.** The Dockerfiles and `docker-compose.yml` were deleted in
+C5: all three were broken (backend `CMD` invoked the deleted NestJS entry point, the frontend
+image copied a standalone output that was never produced, compose published 4000 against an app
+on 5000 and provisioned a Redis nothing referenced). Do not reintroduce them without a reason.
+
+```bash
+cd backend  && npm run build && npm start   # tsc → dist/, then node dist/server.js
+cd frontend && npm run build && npm start   # next build, then next start
+```
+
+Postgres runs natively — `DATABASE_URL` points at it. Run `npx prisma migrate deploy` before
+starting a built backend.
+
+**`HOST` is the setting that matters when deploying.** It defaults to `127.0.0.1`, which is
+correct locally and refuses connections from other machines. Any platform that routes traffic
+into the process — Railway, Render, Fly, systemd behind nginx — needs `HOST=0.0.0.0`, and they
+set `PORT` themselves. It used to be hardcoded to loopback, which made the app unreachable on
+every one of them.
 
 ---
 
