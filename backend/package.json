@@ -15,7 +15,7 @@
     "test": "echo \"No tests yet \u2014 see task H4\" && exit 0"
   },
   "dependencies": {
-    "@prisma/client": "^5.4.0",
+    "@prisma/client": "^7.9.1",
     "@types/cookie-parser": "^1.4.9",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.7",
