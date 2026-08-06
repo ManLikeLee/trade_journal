@@ -16,18 +16,18 @@ datasource db {
 // USERS
 // ─────────────────────────────────────────
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String    @map("password_hash")
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
   name         String?
-  avatarUrl    String?   @map("avatar_url")
-  timezone     String    @default("UTC")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  avatarUrl    String?  @map("avatar_url")
+  timezone     String   @default("UTC")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  accounts     Account[]
-  sessions     Session[]
-  tags         Tag[]
+  accounts Account[]
+  sessions Session[]
+  tags     Tag[]
 
   @@map("users")
 }
@@ -36,17 +36,20 @@ model User {
 // SESSIONS (refresh token store)
 // ─────────────────────────────────────────
 model Session {
-  id           String   @id @default(cuid())
-  userId       String   @map("user_id")
-  refreshToken String   @unique @map("refresh_token")
-  expiresAt    DateTime @map("expires_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  userAgent    String?  @map("user_agent")
-  ipAddress    String?  @map("ip_address")
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  /// SHA-256 of the refresh token. The raw value is returned to the client once
+  /// and never stored — see utils/token.ts for why SHA-256 and not bcrypt.
+  refreshTokenHash String?  @unique @map("refresh_token_hash")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  userAgent        String?  @map("user_agent")
+  ipAddress        String?  @map("ip_address")
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
   @@map("sessions")
 }
 
@@ -54,21 +57,26 @@ model Session {
 // ACCOUNTS (broker accounts)
 // ─────────────────────────────────────────
 model Account {
-  id            String      @id @default(cuid())
-  userId        String      @map("user_id")
-  name          String
-  broker        String
-  platform      String?     // 'MT4' | 'MT5'
-  accountNumber String?     @map("account_number")
-  currency      String      @default("USD")
-  initialBalance Decimal    @default(0) @map("initial_balance") @db.Decimal(18, 2)
-  isActive      Boolean     @default(true) @map("is_active")
-  apiKey        String?     @map("api_key")  // for MT4/MT5 EA auth
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  name           String
+  broker         String
+  platform       String? // 'MT4' | 'MT5'
+  accountNumber  String?  @map("account_number")
+  currency       String   @default("USD")
+  initialBalance Decimal  @default(0) @map("initial_balance") @db.Decimal(18, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  /// SHA-256 of the API key. Unique + indexed: this is the lookup the MT4/MT5
+  /// EA performs on every sync cycle, previously a sequential scan.
+  apiKeyHash     String?  @unique @map("api_key_hash")
+  /// Last 4 characters of the raw key, for display. Not derivable from the hash,
+  /// so it must be stored. Not sensitive on its own.
+  apiKeyLast4    String?  @map("api_key_last4")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trades       Trade[]
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades Trade[]
 
   @@index([userId])
   @@map("accounts")
@@ -78,51 +86,54 @@ model Account {
 // TRADES
 // ─────────────────────────────────────────
 model Trade {
-  id             String       @id @default(cuid())
-  accountId      String       @map("account_id")
+  id        String @id @default(cuid())
+  accountId String @map("account_id")
 
   // Identity — used for idempotency on MT4/MT5 sync
-  externalTicket String?      @map("external_ticket")
+  externalTicket String? @map("external_ticket")
 
   // Instrument
-  symbol         String
-  direction      TradeDirection
+  symbol    String
+  direction TradeDirection
 
   // Sizing
-  lotSize        Decimal      @map("lot_size") @db.Decimal(18, 4)
+  lotSize Decimal @map("lot_size") @db.Decimal(18, 4)
 
   // Prices
-  entryPrice     Decimal      @map("entry_price") @db.Decimal(18, 5)
-  exitPrice      Decimal?     @map("exit_price") @db.Decimal(18, 5)
-  stopLoss       Decimal?     @map("stop_loss") @db.Decimal(18, 5)
-  takeProfit     Decimal?     @map("take_profit") @db.Decimal(18, 5)
+  entryPrice Decimal  @map("entry_price") @db.Decimal(18, 5)
+  exitPrice  Decimal? @map("exit_price") @db.Decimal(18, 5)
+  stopLoss   Decimal? @map("stop_loss") @db.Decimal(18, 5)
+  takeProfit Decimal? @map("take_profit") @db.Decimal(18, 5)
 
   // Timing
-  openTime       DateTime     @map("open_time")
-  closeTime      DateTime?    @map("close_time")
+  openTime  DateTime  @map("open_time")
+  closeTime DateTime? @map("close_time")
 
   // Computed on write (denormalised for query performance)
-  pnl            Decimal?     @db.Decimal(18, 2)
-  commission     Decimal      @default(0) @db.Decimal(18, 2)
-  swap           Decimal      @default(0) @db.Decimal(18, 2)
-  riskReward     Decimal?     @map("risk_reward") @db.Decimal(10, 4)
-  pips           Decimal?     @db.Decimal(10, 1)
+  pnl        Decimal? @db.Decimal(18, 2)
+  commission Decimal  @default(0) @db.Decimal(18, 2)
+  swap       Decimal  @default(0) @db.Decimal(18, 2)
+  riskReward Decimal? @map("risk_reward") @db.Decimal(10, 4)
+  pips       Decimal? @db.Decimal(10, 1)
 
-  status         TradeStatus  @default(OPEN)
-  source         TradeSource  @default(MANUAL)
+  status TradeStatus @default(OPEN)
+  source TradeSource @default(MANUAL)
 
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  account        Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  notes          TradeNote[]
-  tradeTags      TradeTag[]
+  account   Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  notes     TradeNote[]
+  tradeTags TradeTag[]
 
-  @@index([accountId])
   @@unique([accountId, externalTicket])
+  @@index([accountId])
   @@index([openTime])
-  @@index([symbol])
-  @@index([status])
+  /// Every analytics query: WHERE account_id IN (...) AND status='CLOSED' ORDER BY close_time.
+  /// close_time had no index at all.
+  @@index([accountId, status, closeTime])
+  /// The trade list's default sort.
+  @@index([accountId, openTime(sort: Desc)])
   @@map("trades")
 }
 
@@ -149,16 +160,16 @@ enum TradeSource {
 // TRADE NOTES
 // ─────────────────────────────────────────
 model TradeNote {
-  id        String    @id @default(cuid())
-  tradeId   String    @map("trade_id")
-  content   String    @db.Text
+  id        String   @id @default(cuid())
+  tradeId   String   @map("trade_id")
+  content   String   @db.Text
   emotion   Emotion?
-  mistake   String?   @db.Text
-  lesson    String?   @db.Text
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  mistake   String?  @db.Text
+  lesson    String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  trade     Trade     @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
 
   @@index([tradeId])
   @@map("trade_notes")
@@ -179,11 +190,11 @@ enum Emotion {
 // TAGS
 // ─────────────────────────────────────────
 model Tag {
-  id        String     @id @default(cuid())
-  userId    String     @map("user_id")
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
   name      String
-  color     String     @default("#6366f1")
-  createdAt DateTime   @default(now()) @map("created_at")
+  color     String   @default("#6366f1")
+  createdAt DateTime @default(now()) @map("created_at")
 
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   tradeTags TradeTag[]
@@ -196,11 +207,11 @@ model Tag {
 // TRADE_TAGS (junction)
 // ─────────────────────────────────────────
 model TradeTag {
-  tradeId   String @map("trade_id")
-  tagId     String @map("tag_id")
+  tradeId String @map("trade_id")
+  tagId   String @map("tag_id")
 
-  trade     Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
-  tag       Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([tradeId, tagId])
   @@map("trade_tags")

@@ -4,6 +4,7 @@ import { prisma } from '../../utils/prisma';
 import { ForbiddenError, NotFoundError, BadRequestError } from '../../utils/errors';
 import type { CreateTradeInput, UpdateTradeInput, TradesQuery, CreateNoteInput } from './trades.schema';
 import { computePnl, computeRiskReward, type PnlFailureReason } from '../../domain/pnl';
+import { hashToken } from '../../utils/token';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -396,10 +397,11 @@ export async function syncTrade(
 // Validate accountId ownership from apiKey (called by mt-sync router)
 export async function getAccountByApiKey(apiKey: string) {
   if (!apiKey) return null;
-  // Matches on the key but does not return it — the caller only needs identity
-  // and currency.
-  return prisma.account.findFirst({
-    where: { apiKey },
+  // Indexed unique lookup on the digest. This runs on every EA sync cycle and
+  // was a sequential scan over `accounts` against an unindexed raw column.
+  // The key itself is neither stored nor returned.
+  return prisma.account.findUnique({
+    where: { apiKeyHash: hashToken(apiKey) },
     select: { id: true, userId: true, currency: true },
   });
 }

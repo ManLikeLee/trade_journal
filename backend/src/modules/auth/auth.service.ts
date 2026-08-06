@@ -4,6 +4,7 @@ import { prisma } from '../../utils/prisma';
 import { env } from '../../config/env';
 import { ConflictError, UnauthorizedError } from '../../utils/errors';
 import type { RegisterInput, LoginInput } from './auth.schema';
+import { generateToken, hashToken } from '../../utils/token';
 
 // Deliberately expensive: ~250 ms per hash. Do not lower it — the denial-of-
 // service that cost enables is mitigated by rate limiting (middleware/rateLimit.ts),
@@ -67,7 +68,9 @@ export async function login(input: LoginInput) {
  */
 export async function refresh(rawToken: string) {
   const session = await prisma.session.findUnique({
-    where: { refreshToken: rawToken },
+    // Looked up by hash: the raw token is never stored, so it cannot be read
+    // back out of a database dump.
+    where: { refreshTokenHash: hashToken(rawToken) },
     // Only the email is used below. `include: { user: true }` pulled the whole
     // user row, password hash included, on every token refresh.
     select: { id: true, userId: true, expiresAt: true, user: { select: { email: true } } },
@@ -82,7 +85,7 @@ export async function refresh(rawToken: string) {
 }
 
 export async function logout(rawToken: string) {
-  await prisma.session.deleteMany({ where: { refreshToken: rawToken } });
+  await prisma.session.deleteMany({ where: { refreshTokenHash: hashToken(rawToken) } });
 }
 
 export async function getMe(userId: string) {
@@ -106,13 +109,18 @@ async function issueTokens(userId: string, payload: Record<string, unknown>) {
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + REFRESH_TTL_DAYS);
 
-  const session = await prisma.session.create({
+  // 256 bits from a CSPRNG, up from randomUUID's 122. Only the digest is
+  // persisted; the raw value goes to the client's httpOnly cookie and is never
+  // recoverable from the database.
+  const refreshToken = generateToken();
+
+  await prisma.session.create({
     data: {
       userId,
-      refreshToken: crypto.randomUUID(),
+      refreshTokenHash: hashToken(refreshToken),
       expiresAt,
     },
   });
 
-  return { accessToken, refreshToken: session.refreshToken, expiresIn: 900 };
+  return { accessToken, refreshToken, expiresIn: 900 };
 }

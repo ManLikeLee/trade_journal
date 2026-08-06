@@ -3,6 +3,7 @@ import type { Account } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { ForbiddenError, NotFoundError } from '../../utils/errors';
 import type { CreateAccountInput, UpdateAccountInput } from './accounts.schema';
+import { generateToken, hashToken, tokenLast4 } from '../../utils/token';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -48,19 +49,28 @@ export interface AccountWithSecret extends PublicAccount {
   apiKey: string | null;
 }
 
-/** Strips the key and replaces it with a mask. The single exit point for an account row. */
+/**
+ * Strips the key material and exposes only the mask. The single exit point for
+ * an account row.
+ *
+ * `apiKeyLast4` is now read from its own column rather than sliced off the raw
+ * key: the raw key is no longer stored, so it cannot be derived here.
+ */
 function toPublicAccount(account: Account): PublicAccount {
-  const { apiKey, ...rest } = account;
+  const { apiKeyHash: _apiKeyHash, apiKeyLast4, ...rest } = account;
   return {
     ...rest,
-    hasApiKey: Boolean(apiKey),
-    apiKeyLast4: apiKey ? apiKey.slice(-4) : null,
+    hasApiKey: Boolean(account.apiKeyHash),
+    apiKeyLast4: apiKeyLast4 ?? null,
   };
 }
 
-/** Reveal-once shape: the mask plus the key itself. */
-function toAccountWithSecret(account: Account): AccountWithSecret {
-  return { ...toPublicAccount(account), apiKey: account.apiKey };
+/**
+ * Reveal-once shape: the mask plus the raw key, which exists only in memory for
+ * the duration of the create/regenerate response and is never persisted.
+ */
+function toAccountWithSecret(account: Account, rawApiKey: string | null): AccountWithSecret {
+  return { ...toPublicAccount(account), apiKey: rawApiKey };
 }
 
 export async function listAccounts(userId: string): Promise<PublicAccount[]> {
@@ -84,6 +94,9 @@ export async function createAccount(
   });
 
   if (existing) {
+    // An existing account keeps its key. The raw value is not recoverable from
+    // the stored hash, so a fresh one is issued when none was set.
+    const rawApiKey = existing.apiKeyHash ? null : generateToken();
     const updated = await prisma.account.update({
       where: { id: existing.id },
       data: {
@@ -93,12 +106,16 @@ export async function createAccount(
         currency: input.currency ?? existing.currency,
         initialBalance: new Decimal(input.initialBalance ?? Number(existing.initialBalance)),
         isActive: true,
-        apiKey: existing.apiKey ?? crypto.randomUUID(),
+        ...(rawApiKey
+          ? { apiKeyHash: hashToken(rawApiKey), apiKeyLast4: tokenLast4(rawApiKey) }
+          : {}),
       },
     });
-    return toAccountWithSecret(updated);
+    // null when the account already had a key: it cannot be re-revealed.
+    return toAccountWithSecret(updated, rawApiKey);
   }
 
+  const rawApiKey = generateToken();
   const created = await prisma.account.create({
     data: {
       userId,
@@ -108,10 +125,11 @@ export async function createAccount(
       accountNumber: input.accountNumber,
       currency: input.currency ?? 'USD',
       initialBalance: new Decimal(input.initialBalance ?? 0),
-      apiKey: crypto.randomUUID(),
+      apiKeyHash: hashToken(rawApiKey),
+      apiKeyLast4: tokenLast4(rawApiKey),
     },
   });
-  return toAccountWithSecret(created);
+  return toAccountWithSecret(created, rawApiKey);
 }
 
 export async function getAccount(userId: string, id: string): Promise<PublicAccount> {
@@ -146,11 +164,12 @@ export async function deleteAccount(userId: string, id: string): Promise<void> {
  */
 export async function regenerateApiKey(userId: string, id: string): Promise<AccountWithSecret> {
   await assertOwner(userId, id);
+  const rawApiKey = generateToken();
   const updated = await prisma.account.update({
     where: { id },
-    data: { apiKey: crypto.randomUUID() },
+    data: { apiKeyHash: hashToken(rawApiKey), apiKeyLast4: tokenLast4(rawApiKey) },
   });
-  return toAccountWithSecret(updated);
+  return toAccountWithSecret(updated, rawApiKey);
 }
 
 async function assertOwner(userId: string, id: string) {

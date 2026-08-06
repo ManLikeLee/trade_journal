@@ -37,7 +37,9 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
 - [x] **C8** — Add rate limiting on auth and sync endpoints.
       *Done 2026-08-05. Verified live: login 6th attempt → 429 + Retry-After. Helmet added,
       login timing side channel closed.*
-- [ ] **C9** — Hash refresh tokens and API keys at rest (SHA-256); unique index on the hash.
+- [x] **C9** — Hash refresh tokens and API keys at rest (SHA-256); unique index on the hash.
+      *Done 2026-08-06. Existing EA key and browser sessions kept working. EA auth lookup:
+      Seq Scan → Index Scan, 21× faster at 10k accounts.*
 - [x] **C10** — Whitelist `sortBy` as a Zod enum on both ends; make `duration` non-sortable.
       Clicking the Duration column header currently returns 500.
       *Done 2026-08-04 — verified live against the running API, 500 → 400 → UI can't send it.*
@@ -719,6 +721,70 @@ no session.
 
 **Deferred:** 2 items added.
 
+### 2026-08-06 — C9: hash tokens at rest, index the EA auth path
+
+**Two migrations, deliberately split** so the backfill sits between them and nothing is dropped
+before its replacement is populated:
+
+`20260806000000_add_token_hashes_and_query_indexes` — adds `sessions.refresh_token_hash`
+(unique), `accounts.api_key_hash` (unique), `accounts.api_key_last4`; adds
+`@@index([expiresAt])` on sessions and the two composites on trades; drops `trades_symbol_idx`
+and `trades_status_idx`.
+
+`20260806010000_drop_raw_token_columns` — drops `sessions.refresh_token` and
+`accounts.api_key`. Opens with a `DO $$` guard that **raises and aborts** if any row still holds
+a raw value with no hash, naming the backfill script in the error. Dropping these is
+irreversible and would silently invalidate a live API key, so it must not run against a
+database that has not been backfilled.
+
+Both generated with `prisma migrate diff` rather than hand-written — the audit flagged
+hand-editing as the cause of schema/migration drift. Verified afterwards with
+`migrate diff --exit-code` → 0: schema and database agree.
+
+**New:** `utils/token.ts` — `generateToken()` (32 random bytes, base64url, 256 bits, replacing
+`randomUUID`'s 122), `hashToken()`, `tokenLast4()`.
+
+**Why SHA-256 and not bcrypt**, documented at length in the file because it looks wrong at a
+glance: these are 256-bit CSPRNG values, not human passwords. There is no dictionary and no
+feasible offline search, so a work factor buys nothing — while bcrypt would add ~250 ms to
+**every EA sync request** and, because it salts each hash, would make the column unindexable.
+That would force a scan-and-compare over every row, which is exactly the sequential scan this
+task exists to remove. Passwords still use bcrypt at cost 12, which is correct.
+
+**`apiKeyLast4` is now a stored column.** C7 sliced it off the plaintext; with the plaintext
+gone it cannot be derived from a hash. Flagged as a consequence in the C7 entry, resolved here.
+
+**Nothing broke, as promised in the task:**
+- **Your live EA key still authenticates** — tested against `/api/mt-sync/trades` both before
+  and after the raw column was dropped: **200**, and a wrong key **401**. Hashing an unchanged
+  raw value yields the value the backfill already stored, so no key had to be re-copied into MT5.
+- **Existing browser sessions stayed signed in** — all 5 session rows backfilled, and every hash
+  was verified *in Postgres* against its raw value (`encode(sha256(refresh_token::bytea),'hex')
+  = refresh_token_hash`): **5/5 sessions, 2/2 accounts matched** before anything was dropped.
+- Full cycle re-tested on the new code: register 201 → refresh 200 → refresh 200 → logout 204 →
+  refresh 401.
+- New sessions and accounts store **only** the digest: `refresh_token IS NULL` / `api_key IS
+  NULL` with a 64-char hex hash, and a 43-char raw key returned to the client once.
+
+**Index performance, measured** — at 3 rows Postgres correctly ignores any index, so 10,000
+temporary accounts were inserted, measured, and removed:
+
+| | Plan | Buffers | Rows filtered | Time |
+|---|---|---|---|---|
+| After C9 (`api_key_hash`, unique index) | **Index Scan** | 4 | 0 | **0.171 ms** |
+| Equivalent to before (index disabled) | Seq Scan | 205 | 10,002 | 3.678 ms |
+
+**21× faster on the hottest, least-authenticated path in the system**, executed by every EA on
+every sync cycle.
+
+**The backfill script survives deliberately.** It is rewritten against raw SQL rather than the
+Prisma client, because the columns it reads no longer exist in the schema and a typed query
+would not compile. Migration `20260806010000` names it in its guard, so anyone restoring a
+pre-C9 backup needs it to work; on an already-migrated database it detects the missing columns
+and exits cleanly.
+
+**Deferred:** 1 item added.
+
 ---
 
 ## Deferred
@@ -752,6 +818,10 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
   remotely reachable, and changing it means altering the Postgres role and updating `.env`
   together. Worth doing if that database is ever exposed beyond this machine.
+- **Refresh-token reuse detection is still absent** (audit S-5 / M13). C9 makes a stolen token
+  unrecoverable from a database dump, but a token stolen *in transit or from the client* is
+  still usable until it rotates, and replay after rotation fails silently rather than revoking
+  the family and alerting.
 - **CSP needs nonces before it can be enforced.** Currently report-only with `'unsafe-inline'`
   on `script-src`. Needs a per-request nonce issued in `middleware.ts` and threaded through
   Next's script tags, or a SHA-256 hash of the theme init script, then flip the header name to
