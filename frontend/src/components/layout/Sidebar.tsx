@@ -1,11 +1,13 @@
 'use client';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, BookOpen, PlusCircle, Settings,
   TrendingUp, LogOut, ChevronDown, Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/auth';
 import { useAccounts } from '@/hooks/useTrades';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
@@ -22,8 +24,32 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const { user, logout } = useAuthStore();
   const { data: accounts } = useAccounts();
+  const [signingOut, setSigningOut] = useState(false);
+
+  /**
+   * Clearing auth state alone left the user sitting on the dashboard: the store
+   * was empty and the cookie gone, but nothing navigated, so it only *looked*
+   * like logout had failed until a reload let middleware redirect.
+   *
+   * The query cache is dropped too. It is held in memory and survives logout, so
+   * without this the next account to sign in on this tab would briefly render
+   * the previous user's trades and balances from cache before refetching.
+   */
+  const handleLogout = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await logout();
+      queryClient.clear();
+      router.replace('/login');
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <aside className="flex h-full flex-col w-[var(--sidebar-width)] border-r border-border/90 bg-card/95 dark:bg-[rgba(10,16,28,0.88)]">
@@ -101,9 +127,10 @@ export function Sidebar() {
             <p className="text-[10px] text-muted-foreground truncate">{user?.email}</p>
           </div>
           <button
-            onClick={() => logout()}
-            className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-            title="Sign out"
+            onClick={handleLogout}
+            disabled={signingOut}
+            className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            title={signingOut ? 'Signing out…' : 'Sign out'}
           >
             <LogOut className="w-3 h-3" />
           </button>

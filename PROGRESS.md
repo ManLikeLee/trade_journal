@@ -689,6 +689,17 @@ request no matter how many queries are waiting, and it covers components added l
 each needing an `enabled` flag. Auth endpoints are skipped, which also prevents recursion since
 `refreshAccessToken()` itself calls `POST /auth/refresh`.
 
+*Logout appeared to do nothing.* `Sidebar` called `logout()` and stopped there: state cleared
+and the cookie was cleared server-side, but nothing navigated, so the user sat on the dashboard
+until a reload let middleware redirect. Pre-existing shape, far more visible now that a stale
+page no longer has a token to work with. `handleLogout` now awaits the call, then
+`router.replace('/login')`, and is guarded against double-clicks.
+
+It also **clears the TanStack query cache**, which is held in memory and survives logout —
+without that, the next account to sign in on the same tab would briefly render the previous
+user's trades and balances from cache before refetching. That is a cross-account data exposure
+in a shared-browser scenario, not just a staleness bug.
+
 **Not verified:** the browser itself. DevTools checks are in the handover.
 
 **Deferred:** 2 items added.
