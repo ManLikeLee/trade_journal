@@ -1,5 +1,4 @@
 'use client';
-import { use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTrade, useDeleteTrade } from '@/hooks/useTrades';
 import { formatCurrency, formatDateTime, formatTradeDuration, cn } from '@/lib/utils';
@@ -69,8 +68,10 @@ function PriceBar({
   );
 }
 
-export default function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+// On Next.js 14 `params` is a plain object. It only becomes a Promise — and
+// `use(params)` only becomes correct — in Next.js 15.
+export default function TradeDetailPage({ params }: { params: { id: string } }) {
+  const { id } = params;
   const router = useRouter();
   const qc = useQueryClient();
   const { data: trade, isLoading } = useTrade(id);

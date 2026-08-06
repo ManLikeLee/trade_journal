@@ -51,9 +51,16 @@ export interface TradeFilters {
 }
 
 export interface AnalyticsSummary {
+  /** Every closed trade in scope — matches what the trades table lists. */
   totalTrades: number;
+  /** The subset carrying a realised P&L. All money figures below use only these. */
+  pricedTrades: number;
+  /** Closed trades with no recorded P&L. Excluded from every figure below. */
+  unpricedTrades: number;
   winCount: number;
   lossCount: number;
+  /** Breakeven trades: neither a win nor a loss, and excluded from winRate. */
+  scratchCount: number;
   winRate: number;
   totalPnl: number;
   grossWin: number;

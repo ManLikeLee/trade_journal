@@ -42,3 +42,10 @@ export class ConflictError extends HttpError {
     this.name = 'ConflictError';
   }
 }
+
+export class TooManyRequestsError extends HttpError {
+  constructor(message = 'Too many requests') {
+    super(429, message);
+    this.name = 'TooManyRequestsError';
+  }
+}

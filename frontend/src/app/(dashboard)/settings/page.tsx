@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Copy, Check, Plus, RefreshCw, Wallet, Key, Eye, EyeOff } from 'lucide-react';
+import { Copy, Check, Plus, RefreshCw, Wallet, Key } from 'lucide-react';
 import { useAccounts } from '@/hooks/useTrades';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -36,14 +36,56 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/**
+ * Shows a freshly issued API key once, then never again.
+ *
+ * The server returns the raw key only from create and regenerate. Every other
+ * response carries `hasApiKey` and `apiKeyLast4` instead, so there is nothing to
+ * re-reveal later — which is the point.
+ */
+function RevealOnceKey({ apiKey, onDismiss }: { apiKey: string; onDismiss: () => void }) {
+  return (
+    <div className="rounded-md border border-primary/40 bg-primary/5 p-2.5 space-y-2">
+      <p className="text-[11px] font-medium flex items-center gap-1.5">
+        <Key className="w-3.5 h-3.5" /> Copy this key now — it will not be shown again.
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 text-[11px] font-mono bg-background rounded-md px-2 py-1.5 border border-border break-all">
+          {apiKey}
+        </code>
+        <CopyButton text={apiKey} />
+      </div>
+      <p className="text-[10.5px] text-muted-foreground">
+        Paste it into your Expert Advisor&apos;s <code className="font-mono">ApiKey</code> input.
+        If you lose it, regenerate to get a new one — the old one stops working.
+      </p>
+      <button onClick={onDismiss} className="ui-btn-secondary h-7 px-2.5 text-[11px]">
+        I&apos;ve copied it
+      </button>
+    </div>
+  );
+}
+
 function AccountCard({ account }: { account: any }) {
   const qc = useQueryClient();
-  const [showKey, setShowKey] = useState(false);
+  const [confirmRegen, setConfirmRegen] = useState(false);
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
 
   const regenKey = useMutation({
     mutationFn: () => api.post(`/accounts/${account.id}/regenerate-api-key`).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
+    onSuccess: (data) => {
+      setRevealedKey(data?.apiKey ?? null);
+      setConfirmRegen(false);
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+    },
   });
+
+  const regenError = regenKey.error as any;
+  const regenErrorMessage =
+    regenError?.response?.data?.error ||
+    regenError?.response?.data?.message ||
+    regenError?.message ||
+    null;
 
   return (
     <div className="section-card space-y-3">
@@ -69,24 +111,58 @@ function AccountCard({ account }: { account: any }) {
         </div>
         <div className="flex items-center gap-2">
           <code className="flex-1 text-[11px] font-mono bg-background rounded-md px-2 py-1.5 border border-border truncate">
-            {showKey ? (account.apiKey ?? 'Not generated') : '•'.repeat(32)}
+            {account.hasApiKey ? `${'•'.repeat(28)}${account.apiKeyLast4 ?? ''}` : 'Not generated'}
           </code>
-          <button onClick={() => setShowKey(s => !s)} className="p-1.5 rounded-md hover:bg-accent transition-colors">
-            {showKey ? <EyeOff className="w-3.5 h-3.5 text-muted-foreground" /> : <Eye className="w-3.5 h-3.5 text-muted-foreground" />}
-          </button>
-          {account.apiKey && <CopyButton text={account.apiKey} />}
           <button
-            onClick={() => regenKey.mutate()}
-            disabled={regenKey.isPending}
-            className="p-1.5 rounded-md hover:bg-accent transition-colors"
+            onClick={() => setConfirmRegen(true)}
+            disabled={regenKey.isPending || confirmRegen}
+            className="p-1.5 rounded-md hover:bg-accent transition-colors disabled:opacity-40"
             title="Regenerate key"
           >
             <RefreshCw className={cn('w-3.5 h-3.5 text-muted-foreground', regenKey.isPending && 'animate-spin')} />
           </button>
         </div>
         <p className="text-[10.5px] text-muted-foreground">
-          Use this key in your MT4/MT5 Expert Advisor as the <code className="font-mono">X-Api-Key</code> header.
+          Shown once when created or regenerated. Use it in your MT4/MT5 Expert Advisor as the{' '}
+          <code className="font-mono">X-Api-Key</code> header.
         </p>
+
+        {/* Regenerating instantly invalidates the running EA's key, so confirm first. */}
+        {confirmRegen && (
+          <div className="rounded-md border border-loss/40 bg-loss/5 p-2.5 space-y-2">
+            <p className="text-[11px] font-medium">Regenerate this API key?</p>
+            <p className="text-[10.5px] text-muted-foreground">
+              The current key stops working immediately. Any Expert Advisor using it will fail
+              to sync until you paste the new key into its <code className="font-mono">ApiKey</code> input.
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => regenKey.mutate()}
+                disabled={regenKey.isPending}
+                className="ui-btn h-7 px-2.5 text-[11px] bg-loss text-white hover:bg-loss/90"
+              >
+                {regenKey.isPending ? 'Regenerating…' : 'Yes, regenerate'}
+              </button>
+              <button
+                onClick={() => setConfirmRegen(false)}
+                disabled={regenKey.isPending}
+                className="ui-btn-secondary h-7 px-2.5 text-[11px]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {regenErrorMessage && (
+          <p className="ui-error" role="alert">
+            Could not regenerate the key: {String(regenErrorMessage)}
+          </p>
+        )}
+
+        {revealedKey && (
+          <RevealOnceKey apiKey={revealedKey} onDismiss={() => setRevealedKey(null)} />
+        )}
       </div>
 
       {/* Request format for the sync endpoint */}
@@ -103,7 +179,7 @@ function AccountCard({ account }: { account: any }) {
         <pre className="mt-2 p-2.5 rounded-md bg-muted/55 border border-border overflow-x-auto text-[10.5px] font-mono text-muted-foreground">
 {`POST ${API_BASE_URL}/mt-sync/trades
 Content-Type: application/json
-X-Api-Key: ${account.apiKey ?? 'YOUR_API_KEY_HERE'}
+X-Api-Key: <your API key — shown once when created or regenerated>
 
 {
   "accountNumber": "${account.accountNumber ?? '12345678'}",
@@ -148,13 +224,25 @@ export default function SettingsPage() {
     resolver: zodResolver(accountSchema),
   });
 
+  // The create response is one of only two that carry the raw API key, so it is
+  // surfaced immediately and never again.
+  const [newAccountKey, setNewAccountKey] = useState<string | null>(null);
+
   const createAccount = useMutation({
     mutationFn: (data: any) => api.post('/accounts', data).then(r => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['accounts'] }); setShowForm(false); reset(); },
+    onSuccess: (data) => {
+      setNewAccountKey(data?.apiKey ?? null);
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      setShowForm(false);
+      reset();
+    },
   });
 
   const createError = createAccount.error as any;
   const createErrorMessage =
+    // The API's error shape is { error, details? } — `message` was never a field
+    // it returns, so failures surfaced axios's own generic text.
+    createError?.response?.data?.error ||
     createError?.response?.data?.message ||
     createError?.message ||
     null;
@@ -233,6 +321,13 @@ export default function SettingsPage() {
           </form>
         )}
 
+        {newAccountKey && (
+          <div className="section-card border-primary/25">
+            <p className="text-[11px] font-medium mb-2">Account created — here is its API key</p>
+            <RevealOnceKey apiKey={newAccountKey} onDismiss={() => setNewAccountKey(null)} />
+          </div>
+        )}
+
         <div className="space-y-2.5">
           {accounts?.map((account: any) => (
             <AccountCard key={account.id} account={account} />
@@ -278,7 +373,7 @@ export default function SettingsPage() {
           <code className="block bg-muted/50 rounded-md px-3 py-2 text-[11px] font-mono border border-border">
             POST {API_BASE_URL}/mt-sync/trades
           </code>
-          <p className="text-[11px]">Authentication: <code className="font-mono text-[11px]">X-Api-Key</code> header with your account's API key.</p>
+          <p className="text-[11px]">Authentication: <code className="font-mono text-[11px]">X-Api-Key</code> header with your account&apos;s API key.</p>
           <p className="text-[11px]">The <code className="font-mono">ticket</code> field is used as the idempotency key. Duplicate POSTs update existing trades rather than creating duplicates.</p>
         </div>
       </section>

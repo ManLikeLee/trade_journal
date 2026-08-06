@@ -1,5 +1,16 @@
+/**
+ * NULL AND ZERO P&L POLICY (see domain/trade-outcome.ts for the full statement):
+ *
+ *   pnl === null → UNPRICED. Excluded from every statistic in this file.
+ *   pnl === 0    → SCRATCH. A real outcome, not a loss. Excluded from wins and
+ *                  losses, and it breaks a streak rather than extending one.
+ *
+ * `analytics.service.ts` applies the same policy. The dashboard and this panel
+ * must never report different trade counts for the same data.
+ */
 import { TradeStatus } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import { classifyOutcome, realisedPnl, pricedOnly, winRateOf } from '../../domain/trade-outcome';
 
 export interface Insight {
   id: string;
@@ -10,6 +21,10 @@ export interface Insight {
   severity: 'info' | 'warning' | 'success' | 'danger';
 }
 
+// The analyzers are exported as pure functions: they take trade arrays and
+// return insights, touching neither Prisma nor req. That makes the null/zero
+// policy directly testable without a database, which is how the fixtures below
+// the policy comment were verified.
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 async function getClosedTrades(userId: string, accountId?: string) {
@@ -25,18 +40,23 @@ async function getClosedTrades(userId: string, accountId?: string) {
   });
 }
 
-function analyzeEmotions(trades: { pnl: unknown; notes: { emotion: unknown }[] }[]): Insight[] {
+export function analyzeEmotions(trades: { pnl: unknown; notes: { emotion: unknown }[] }[]): Insight[] {
   const insights: Insight[] = [];
   const tradesWithNotes = trades.filter((t) => t.notes?.length > 0);
   if (!tradesWithNotes.length) return insights;
 
   const stats: Record<string, { pnl: number[]; count: number }> = {};
   for (const trade of tradesWithNotes) {
+    // Unpriced trades contribute no P&L, so they cannot inform an emotion's
+    // average or win rate — including them at 0 would drag every average
+    // toward breakeven.
+    const value = realisedPnl(trade.pnl);
+    if (value === null) continue;
     for (const note of trade.notes) {
       if (!note.emotion) continue;
       const e = String(note.emotion);
       if (!stats[e]) stats[e] = { pnl: [], count: 0 };
-      stats[e].pnl.push(Number(trade.pnl));
+      stats[e].pnl.push(value);
       stats[e].count++;
     }
   }
@@ -44,7 +64,7 @@ function analyzeEmotions(trades: { pnl: unknown; notes: { emotion: unknown }[] }
   for (const [emotion, s] of Object.entries(stats)) {
     if (s.count < 3) continue;
     const avg = s.pnl.reduce((a, b) => a + b, 0) / s.count;
-    const wr = (s.pnl.filter((p) => p > 0).length / s.count) * 100;
+    const wr = winRateOf(s.pnl);
 
     if (emotion === 'FOMO' && avg < 0) {
       insights.push({
@@ -80,14 +100,14 @@ function analyzeEmotions(trades: { pnl: unknown; notes: { emotion: unknown }[] }
   return insights;
 }
 
-function analyzeDayOfWeek(trades: { closeTime: unknown; pnl: unknown }[]): Insight[] {
+export function analyzeDayOfWeek(trades: { closeTime: unknown; pnl: unknown }[]): Insight[] {
   const insights: Insight[] = [];
   const dayStats: Record<number, { pnl: number[]; wins: number }> = {};
 
-  for (const t of trades) {
+  for (const t of pricedOnly(trades)) {
     const day = new Date(t.closeTime as string).getDay();
     if (!dayStats[day]) dayStats[day] = { pnl: [], wins: 0 };
-    const p = Number(t.pnl);
+    const p = realisedPnl(t.pnl)!;
     dayStats[day].pnl.push(p);
     if (p > 0) dayStats[day].wins++;
   }
@@ -98,7 +118,7 @@ function analyzeDayOfWeek(trades: { closeTime: unknown; pnl: unknown }[]): Insig
       day: Number(day),
       name: DAY_NAMES[Number(day)],
       avg: s.pnl.reduce((a, b) => a + b, 0) / s.pnl.length,
-      wr: (s.wins / s.pnl.length) * 100,
+      wr: winRateOf(s.pnl),
       count: s.pnl.length,
     }));
 
@@ -130,7 +150,7 @@ function analyzeDayOfWeek(trades: { closeTime: unknown; pnl: unknown }[]): Insig
   return insights;
 }
 
-function analyzeHoldTime(trades: { openTime: unknown; closeTime: unknown; pnl: unknown }[]): Insight[] {
+export function analyzeHoldTime(trades: { openTime: unknown; closeTime: unknown; pnl: unknown }[]): Insight[] {
   const insights: Insight[] = [];
   const tradesWithDuration = trades.filter((t) => t.closeTime);
   const buckets = {
@@ -150,13 +170,14 @@ function analyzeHoldTime(trades: { openTime: unknown; closeTime: unknown; pnl: u
   }
 
   const stats = Object.entries(buckets)
-    .filter(([, b]) => b.trades.length >= 3)
     .map(([key, b]) => {
-      const pnls = b.trades.map((t) => Number(t.pnl));
-      const avg = pnls.reduce((s, v) => s + v, 0) / pnls.length;
-      const wr = (pnls.filter((p) => p > 0).length / pnls.length) * 100;
-      return { key, label: b.label, avg, wr, count: b.trades.length };
-    });
+      const pnls = pricedOnly(b.trades).map((t) => realisedPnl(t.pnl)!);
+      const avg = pnls.length ? pnls.reduce((s, v) => s + v, 0) / pnls.length : 0;
+      return { key, label: b.label, avg, wr: winRateOf(pnls), count: pnls.length };
+    })
+    // Gate on priced trades, not on how many landed in the bucket: three
+    // unpriced trades are not three data points.
+    .filter((s) => s.count >= 3);
 
   if (stats.length < 2) return insights;
 
@@ -186,22 +207,21 @@ function analyzeHoldTime(trades: { openTime: unknown; closeTime: unknown; pnl: u
   return insights;
 }
 
-function analyzeSymbols(trades: { symbol: unknown; pnl: unknown }[]): Insight[] {
+export function analyzeSymbols(trades: { symbol: unknown; pnl: unknown }[]): Insight[] {
   const insights: Insight[] = [];
   const symMap: Record<string, number[]> = {};
 
-  for (const t of trades) {
+  for (const t of pricedOnly(trades)) {
     const sym = String(t.symbol);
     if (!symMap[sym]) symMap[sym] = [];
-    symMap[sym].push(Number(t.pnl));
+    symMap[sym].push(realisedPnl(t.pnl)!);
   }
 
   const symStats = Object.entries(symMap)
     .filter(([, p]) => p.length >= 5)
     .map(([symbol, pnls]) => {
       const avg = pnls.reduce((s, v) => s + v, 0) / pnls.length;
-      const wr = (pnls.filter((p) => p > 0).length / pnls.length) * 100;
-      return { symbol, avg, wr, count: pnls.length };
+      return { symbol, avg, wr: winRateOf(pnls), count: pnls.length };
     });
 
   const losers = symStats.filter((s) => s.avg < -2);
@@ -232,14 +252,34 @@ function analyzeSymbols(trades: { symbol: unknown; pnl: unknown }[]): Insight[] 
   return insights;
 }
 
-function analyzeStreaks(trades: { pnl: unknown }[]): Insight[] {
+export function analyzeStreaks(trades: { pnl: unknown }[]): Insight[] {
   const insights: Insight[] = [];
   let maxLoss = 0, curLoss = 0;
   let maxWin = 0, curWin = 0;
 
   for (const t of trades) {
-    if (Number(t.pnl) > 0) { curWin++; curLoss = 0; maxWin = Math.max(maxWin, curWin); }
-    else { curLoss++; curWin = 0; maxLoss = Math.max(maxLoss, curLoss); }
+    switch (classifyOutcome(t.pnl)) {
+      case 'WIN':
+        curWin++;
+        curLoss = 0;
+        maxWin = Math.max(maxWin, curWin);
+        break;
+      case 'LOSS':
+        curLoss++;
+        curWin = 0;
+        maxLoss = Math.max(maxLoss, curLoss);
+        break;
+      case 'SCRATCH':
+        // A breakeven is a real outcome that ends both runs. It must not extend
+        // a losing streak, which is what the old bare `else` did.
+        curWin = 0;
+        curLoss = 0;
+        break;
+      case 'UNPRICED':
+        // No known result: it neither confirms nor breaks a run, so the
+        // sequence continues across it as though the trade were not there.
+        break;
+    }
   }
 
   if (curLoss >= 3) {
@@ -267,13 +307,27 @@ function analyzeStreaks(trades: { pnl: unknown }[]): Insight[] {
 
 export async function generateInsights(userId: string, accountId?: string): Promise<Insight[]> {
   const trades = await getClosedTrades(userId, accountId);
-  if (trades.length < 5) {
+
+  // Gate on trades that actually carry a result. Counting unpriced trades here
+  // let the analyzers run on data they would all discard, producing an empty
+  // insights panel with no explanation of why.
+  const priced = pricedOnly(trades);
+  const unpriced = trades.length - priced.length;
+
+  if (priced.length < 5) {
     return [
       {
         id: 'not-enough-data',
         type: 'suggestion',
         title: 'Keep logging trades',
-        description: `You need at least 5 closed trades for insights. You have ${trades.length} so far.`,
+        description:
+          `You need at least 5 closed trades with a recorded P&L for insights. ` +
+          `You have ${priced.length} so far.` +
+          (unpriced > 0
+            ? ` ${unpriced} further ${unpriced === 1 ? 'trade has' : 'trades have'} no P&L recorded ` +
+              `and ${unpriced === 1 ? 'is' : 'are'} not counted — add the realised figure to include ` +
+              `${unpriced === 1 ? 'it' : 'them'}.`
+            : ''),
         severity: 'info',
       },
     ];

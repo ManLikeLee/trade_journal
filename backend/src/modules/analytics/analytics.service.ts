@@ -1,5 +1,21 @@
+/**
+ * NULL AND ZERO P&L POLICY (see domain/trade-outcome.ts for the full statement):
+ *
+ *   pnl === null → UNPRICED. Excluded from every money statistic here, but
+ *                  counted and reported as `unpricedTrades` rather than silently
+ *                  dropped — which is what made the dashboard report 0 trades
+ *                  while the trades table listed them.
+ *   pnl === 0    → SCRATCH. A real outcome, not a loss. Counted in
+ *                  `pricedTrades`, excluded from wins, losses and the win-rate
+ *                  denominator.
+ *
+ * `insights.service.ts` applies the same policy. The dashboard and the insights
+ * panel must never report different trade counts for the same data.
+ */
 import { TradeDirection, TradeStatus } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import { computeRiskReward } from '../../domain/pnl';
+import { isPriced } from '../../domain/trade-outcome';
 
 export interface AnalyticsQuery {
   accountId?: string;
@@ -60,26 +76,30 @@ function normalizeTrade(trade: Record<string, unknown>) {
   };
 }
 
+/**
+ * Risk:reward for a trade, preferring the value computed and stored on write.
+ *
+ * The fallback used to be a second, divergent implementation living here: it
+ * preferred `exitPrice ?? takeProfit` where the write path preferred
+ * `takeProfit ?? exitPrice`, so the same trade reported a different R:R
+ * depending on whether you read it from the trades table or from analytics.
+ * Both now call the single implementation in domain/pnl.ts.
+ */
 function resolveRiskReward(t: ReturnType<typeof normalizeTrade>): number | null {
   if (t.riskReward != null && Number.isFinite(t.riskReward) && t.riskReward > 0) {
     return t.riskReward;
   }
-  if (t.entryPrice == null || t.stopLoss == null) return null;
-  const rewardTarget = t.exitPrice ?? t.takeProfit;
-  if (rewardTarget == null) return null;
+  if (t.entryPrice == null) return null;
 
-  const risk =
-    t.direction === TradeDirection.BUY
-      ? t.entryPrice - t.stopLoss
-      : t.stopLoss - t.entryPrice;
-  const reward =
-    t.direction === TradeDirection.BUY
-      ? rewardTarget - t.entryPrice
-      : t.entryPrice - rewardTarget;
+  const rr = computeRiskReward({
+    direction: t.direction === TradeDirection.BUY ? 'BUY' : 'SELL',
+    entryPrice: t.entryPrice,
+    stopLoss: t.stopLoss,
+    takeProfit: t.takeProfit,
+    exitPrice: t.exitPrice,
+  });
 
-  if (risk <= 0) return null;
-  const rr = reward / risk;
-  return Number.isFinite(rr) ? rr : null;
+  return rr === null ? null : rr.toNumber();
 }
 
 function calcDrawdown(pnls: number[]): { maxDrawdown: number; maxDrawdownPct: number } {
@@ -98,9 +118,10 @@ function calcDrawdown(pnls: number[]): { maxDrawdown: number; maxDrawdownPct: nu
   return { maxDrawdown: maxDd, maxDrawdownPct: maxDdPct };
 }
 
-function emptyStats() {
+function emptyStats(totalTrades = 0, unpricedTrades = 0) {
   return {
-    totalTrades: 0, winCount: 0, lossCount: 0, winRate: 0,
+    totalTrades, pricedTrades: 0, unpricedTrades,
+    winCount: 0, lossCount: 0, scratchCount: 0, winRate: 0,
     totalPnl: 0, grossWin: 0, grossLoss: 0, avgWin: 0, avgLoss: 0,
     profitFactor: 0, expectancy: 0, avgRR: 0, maxDrawdown: 0, maxDrawdownPct: 0,
   };
@@ -111,11 +132,14 @@ function emptyStats() {
 export async function getSummary(userId: string, query: AnalyticsQuery = {}) {
   const trades = await getClosedTrades(userId, query);
   const normalized = trades.map(normalizeTrade);
-  const realized = normalized.filter((t) => t.pnl != null);
-  if (realized.length === 0) return emptyStats();
+  const realized = normalized.filter(isPriced);
+  const unpricedCount = normalized.length - realized.length;
+  if (realized.length === 0) return emptyStats(normalized.length, unpricedCount);
 
   const wins = realized.filter((t) => t.pnl! > 0);
   const losses = realized.filter((t) => t.pnl! < 0);
+  // A breakeven is neither. Counted so the three add up to pricedTrades.
+  const scratches = realized.filter((t) => t.pnl === 0);
 
   const totalPnl = realized.reduce((s, t) => s + t.pnl!, 0);
   const grossWin = wins.reduce((s, t) => s + t.pnl!, 0);
@@ -141,9 +165,16 @@ export async function getSummary(userId: string, query: AnalyticsQuery = {}) {
   const { maxDrawdown, maxDrawdownPct } = calcDrawdown(curveTrades.map((t) => t.pnl!));
 
   return {
-    totalTrades: realized.length,
+    // totalTrades means every closed trade in scope, which is what the label
+    // says and what the trades table shows. It previously meant "trades with a
+    // P&L", so the dashboard silently reported a smaller number than the table.
+    totalTrades: normalized.length,
+    // The subset the money statistics below are actually computed over.
+    pricedTrades: realized.length,
+    unpricedTrades: unpricedCount,
     winCount: wins.length,
     lossCount: losses.length,
+    scratchCount: scratches.length,
     winRate: parseFloat((winRate * 100).toFixed(2)),
     totalPnl: parseFloat(totalPnl.toFixed(2)),
     grossWin: parseFloat(grossWin.toFixed(2)),

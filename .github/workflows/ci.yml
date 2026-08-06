@@ -1,0 +1,91 @@
+name: CI
+
+# Runs on every pull request and every push to main. This is the gate that was
+# absent when the audit was written: nothing verified that the application built,
+# type-checked or linted, so nothing noticed when it stopped working.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # Node 20 reached end of life on 2026-04-30. 22 is in maintenance until
+          # 2027-04-30 and matches the version used locally, so CI and the
+          # developer machine cannot drift into different runtime behaviour.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # The Prisma client is generated code that the type-checker needs; without
+      # this, tsc fails on a clean checkout.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      # Compiling proves the artefact `npm start` runs actually exists:
+      # the start script is `node dist/server.js`.
+      - name: Build
+        run: npm run build
+
+      # Wired up and currently a no-op. Task H4 replaces the script body with a
+      # real suite; the step exists now so adding tests needs no CI change.
+      - name: Test
+        run: npm test
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # Node 20 reached end of life on 2026-04-30. 22 is in maintenance until
+          # 2027-04-30 and matches the version used locally, so CI and the
+          # developer machine cannot drift into different runtime behaviour.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      # The single strongest check that the app is shippable: it compiles every
+      # route, which typechecking alone does not do.
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test

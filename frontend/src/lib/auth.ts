@@ -1,6 +1,27 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import { api } from './api';
+import { setAccessToken, markSessionActive, markSessionEnded } from './access-token';
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * TOKEN HANDLING
+ *
+ * The refresh token is NOT here, and must never be. It lives in an httpOnly
+ * cookie set by the API (see backend/src/utils/cookies.ts), so no JavaScript on
+ * this page — including anything injected by an XSS — can read it. It used to
+ * be written to localStorage *and* a JS-readable cookie, which made a single
+ * XSS a 30-day account takeover.
+ *
+ * The access token is held in memory only. It is deliberately not persisted:
+ * a page reload discards it and the session is restored by a silent refresh
+ * against the cookie. Nothing about the session survives in storage a script
+ * can reach.
+ *
+ * Consequence to keep in mind: on a cold load `accessToken` is null and
+ * `checkingAuth` is true until `bootstrap()` resolves. UI must wait on
+ * `checkingAuth` rather than assuming a null token means logged out.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 
 interface User {
   id: string;
@@ -10,165 +31,130 @@ interface User {
 
 interface AuthState {
   user: User | null;
+  /** In memory only. Never persisted. */
   accessToken: string | null;
-  refreshToken: string | null;
   isAuthenticated: boolean;
-  /** True while the initial token-validity check is running on app mount. */
+  /** True until the initial silent refresh resolves on app mount. */
   checkingAuth: boolean;
 
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
-  setTokens: (access: string, refresh: string) => void;
   refreshAccessToken: () => Promise<string | null>;
-  /** Validate the stored access-token once on app mount. Always sets checkingAuth:false. */
-  validateSession: () => Promise<void>;
+  /** Restore a session from the refresh cookie once on app mount. */
+  bootstrap: () => Promise<void>;
 }
 
-function setAuthCookie(refreshToken: string) {
+/**
+ * Remove credentials left by the previous storage model.
+ *
+ * Without this, a token issued before the cookie migration sits in localStorage
+ * for its full 30-day life, readable by any script — the exact exposure this
+ * change removes. The old `tj-auth` cookie is cleared for the same reason.
+ */
+function purgeLegacyCredentials() {
   if (typeof window === 'undefined') return;
-  document.cookie = `tj-auth=${encodeURIComponent(refreshToken)}; path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`;
-}
-
-function clearAuthCookie() {
-  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem('tradejournal-auth');
+  } catch {
+    /* storage disabled — nothing to purge */
+  }
   document.cookie = 'tj-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
 }
 
-function fallbackUserFromToken(accessToken: string): User | null {
-  try {
-    const payload = accessToken.split('.')[1];
-    if (!payload) return null;
-    const decoded = JSON.parse(atob(payload));
-    if (!decoded?.sub || !decoded?.email) return null;
-    return { id: decoded.sub, email: decoded.email, name: decoded.name };
-  } catch {
-    return null;
-  }
-}
+/**
+ * A single in-flight refresh, shared by every caller.
+ *
+ * Refreshing rotates the token server-side, so two concurrent refreshes mean the
+ * second presents a token the first already consumed — a 401, and a spurious
+ * logout. React StrictMode double-invokes effects in development, so the mount
+ * bootstrap alone would trigger exactly that on every page load without this.
+ */
+let inFlightRefresh: Promise<string | null> | null = null;
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
-      user: null,
-      accessToken: null,
-      refreshToken: null,
-      isAuthenticated: false,
-      checkingAuth: true,
+export const useAuthStore = create<AuthState>()((set) => ({
+  user: null,
+  accessToken: null,
+  isAuthenticated: false,
+  checkingAuth: true,
 
-      setTokens: (accessToken, refreshToken) =>
-        set({ accessToken, refreshToken, isAuthenticated: true }),
+  login: async (email, password) => {
+    // The API sets the refresh cookie; the body carries the access token and user.
+    const { data } = await api.post('/auth/login', { email, password });
+    purgeLegacyCredentials();
+    setAccessToken(data.accessToken);
+    markSessionActive();
+    set({
+      accessToken: data.accessToken,
+      user: data.user ?? null,
+      isAuthenticated: true,
+      checkingAuth: false,
+    });
+  },
 
-      login: async (email, password) => {
-        try {
-          const { data } = await api.post('/auth/login', { email, password });
-          const fallbackUser = fallbackUserFromToken(data.accessToken);
-          set({
-            accessToken: data.accessToken,
-            refreshToken: data.refreshToken,
-            isAuthenticated: true,
-            user: fallbackUser,
-          });
-          setAuthCookie(data.refreshToken);
+  register: async (email, password, name) => {
+    const { data } = await api.post('/auth/register', { email, password, name });
+    purgeLegacyCredentials();
+    setAccessToken(data.accessToken);
+    markSessionActive();
+    set({
+      accessToken: data.accessToken,
+      user: data.user ?? null,
+      isAuthenticated: true,
+      checkingAuth: false,
+    });
+  },
 
-          // Populate canonical profile data, but don't fail login if this call flakes.
-          try {
-            const me = await api.get('/auth/me', {
-              headers: { Authorization: `Bearer ${data.accessToken}` },
-              timeout: 8000,
-            });
-            set({ user: me.data });
-          } catch (profileError) {
-            console.warn('Profile fetch after login failed; continuing with token identity.', profileError);
-          }
-        } catch (e) {
-          console.error('AuthStore login error:', e);
-          throw e;
-        }
-      },
+  logout: async () => {
+    try {
+      // No body: the API reads the cookie and clears it server-side.
+      await api.post('/auth/logout');
+    } finally {
+      purgeLegacyCredentials();
+      setAccessToken(null);
+      // Stops every in-flight and subsequent request from trying to refresh a
+      // session we just destroyed.
+      markSessionEnded();
+      set({ user: null, accessToken: null, isAuthenticated: false, checkingAuth: false });
+    }
+  },
 
-      register: async (email, password, name) => {
-        const { data } = await api.post('/auth/register', { email, password, name });
-        const fallbackUser = fallbackUserFromToken(data.accessToken);
+  refreshAccessToken: async () => {
+    if (inFlightRefresh) return inFlightRefresh;
+
+    inFlightRefresh = (async () => {
+      try {
+        // No body: the refresh token travels as an httpOnly cookie.
+        const { data } = await api.post('/auth/refresh');
+        setAccessToken(data.accessToken);
+        markSessionActive();
         set({
           accessToken: data.accessToken,
-          refreshToken: data.refreshToken,
+          user: data.user ?? null,
           isAuthenticated: true,
-          user: fallbackUser,
         });
-        setAuthCookie(data.refreshToken);
-        try {
-          const me = await api.get('/auth/me', {
-            headers: { Authorization: `Bearer ${data.accessToken}` },
-            timeout: 8000,
-          });
-          set({ user: me.data });
-        } catch (profileError) {
-          console.warn('Profile fetch after registration failed; continuing with token identity.', profileError);
-        }
-      },
+        return data.accessToken as string;
+      } catch {
+        setAccessToken(null);
+        markSessionEnded();
+        set({ user: null, accessToken: null, isAuthenticated: false });
+        return null;
+      } finally {
+        inFlightRefresh = null;
+      }
+    })();
 
-      logout: async () => {
-        const { refreshToken } = get();
-        try {
-          if (refreshToken) await api.post('/auth/logout', { refreshToken });
-        } finally {
-          set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false });
-          clearAuthCookie();
-        }
-      },
+    return inFlightRefresh;
+  },
 
-      validateSession: async () => {
-        const { accessToken } = get();
-        if (!accessToken) {
-          console.log('[Auth] No stored token — skipping session check.');
-          set({ checkingAuth: false });
-          return;
-        }
-        try {
-          console.log('[Auth] Validating stored token…');
-          const { data } = await api.get('/auth/me', {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            timeout: 5000,
-          });
-          set({ user: data, isAuthenticated: true, checkingAuth: false });
-          console.log('[Auth] Session valid — user:', data.email);
-        } catch (err) {
-          console.warn('[Auth] Stored token invalid or expired — clearing auth state.', err);
-          set({
-            user: null,
-            accessToken: null,
-            refreshToken: null,
-            isAuthenticated: false,
-            checkingAuth: false,
-          });
-          clearAuthCookie();
-        }
-      },
-
-      refreshAccessToken: async () => {
-        const { refreshToken } = get();
-        if (!refreshToken) return null;
-        try {
-          const { data } = await api.post('/auth/refresh', { refreshToken });
-          set({ accessToken: data.accessToken, refreshToken: data.refreshToken });
-          setAuthCookie(data.refreshToken);
-          return data.accessToken;
-        } catch {
-          set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false });
-          clearAuthCookie();
-          return null;
-        }
-      },
-    }),
-    {
-      name: 'tradejournal-auth',
-      partialize: (s) => ({
-        user: s.user,
-        accessToken: s.accessToken,
-        refreshToken: s.refreshToken,
-        isAuthenticated: s.isAuthenticated,
-      }),
-    }
-  )
-);
+  bootstrap: async () => {
+    purgeLegacyCredentials();
+    // Deliberately goes through refreshAccessToken so it shares the in-flight
+    // singleton above. StrictMode invokes the mount effect twice in development;
+    // without that sharing the second call would present an already-rotated
+    // token, 401, and log the user out on every page load.
+    // A null result is not an error — it is every logged-out visit.
+    await useAuthStore.getState().refreshAccessToken();
+    set({ checkingAuth: false });
+  },
+}));

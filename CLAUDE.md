@@ -96,6 +96,52 @@ catch and call `next(err)`; do not write error responses inline.
 
 ---
 
+## Money: how P&L is decided
+
+`backend/src/domain/` holds the pure arithmetic — no Prisma, no HTTP. Two files:
+
+- **`symbol-spec.ts`** — contract sizes, pip sizes and quote currencies per instrument, plus
+  broker-symbol normalisation (`ger40.cash` → `GER40`, `NAS100` → `US100`). An unknown symbol
+  returns **null**, never a default: a wrong contract size is silently wrong by orders of
+  magnitude. The table is an approximation of retail conventions, not per-broker truth.
+- **`pnl.ts`** — `grossPnl`, `netPnl`, `computePnl`, `computeRiskReward`. Decimal end to end;
+  never convert to `Number` in this layer.
+
+**Precedence — a supplied `pnl` always wins.** An EA reports the broker's realised figure, and
+no local estimate may override the venue that settled the trade. The backend calculates only
+when no `pnl` was supplied and the trade is closed with an exit price. On `PATCH`, a stored
+`pnl` counts as authoritative only when `source !== MANUAL`; otherwise it is our own earlier
+estimate and gets recalculated, so editing commission actually moves the P&L.
+
+**`pnl` in the database is always NET** — after commission and swap — on both paths.
+
+**Costs are negative.** A charge is `-7.00`, matching MT5's `DEAL_COMMISSION` and the data
+already stored. Net P&L therefore *adds* commission and swap. Do not "fix" this to a
+subtraction.
+
+**Currency.** `grossPnl` lands in the instrument's *quote* currency. Conversion to the account
+currency is exact in two cases and refused otherwise:
+
+| Case | Rule |
+|---|---|
+| quote == account currency | unchanged (EURUSD on USD) |
+| base == account currency | divide by the trade's own price (USDJPY on USD) |
+| neither | **refuse** — `NO_FX_RATE`, `pnl` stays null (EURJPY or GER40 on USD) |
+
+Refusing is deliberate. The trade form surfaces it and offers a "Realised P&L" field for the
+trader to enter the broker's number instead.
+
+**Risk:reward** uses `takeProfit ?? exitPrice` — a *planning* metric fixed at entry, which must
+not change when a trade closes. There is exactly one implementation; analytics imports it. Two
+divergent copies previously disagreed with each other.
+
+**The frontend preview** (`lib/pnl-preview.ts`) repeats only the formula. The spec *data* is
+fetched from `GET /api/symbol-specs`, so the table cannot drift. The preview is an estimate;
+the stored figure is always the backend's.
+
+**Backfill:** `backend/src/scripts/backfill-pnl.ts`. Dry run by default, `--apply` to write.
+Only ever fills nulls, so it is idempotent and can never overwrite a broker's figure.
+
 ## Database
 
 `backend/prisma/schema.prisma`. PostgreSQL. Models are PascalCase/camelCase in Prisma and
@@ -180,6 +226,7 @@ Every route the backend registers, as of C2. Frontend paths are relative to the 
 | GET | `/api/analytics/by-day` | Bearer | `hooks/useTrades.ts` (`usePnlByDay`) |
 | GET | `/api/analytics/by-session` | Bearer | **unused** |
 | GET | `/api/analytics/insights` | Bearer | `hooks/useInsights.ts` |
+| GET | `/api/symbol-specs` | Bearer | `hooks/useSymbolSpecs.ts` |
 | POST | `/api/mt-sync/trades` | `x-api-key` | `mt5/TradeJournalSyncEA.mq5` |
 
 Note the hook names `usePnlBySymbol` / `usePnlByDay` no longer match their route names
@@ -188,6 +235,29 @@ keys are internal, so this is cosmetic, but do not read the hook name as the pat
 
 `POST /api/mt-sync/trades` takes a **batch envelope**, not a single trade:
 `{ accountNumber, platform: 'MT4'|'MT5', trades: [...] }` — see `mt-sync.schema.ts`.
+
+## Rate limiting and security headers
+
+`middleware/rateLimit.ts` (express-rate-limit) and `helmet` in `app.ts`.
+
+| Route | Limit | Key |
+|---|---|---|
+| `POST /api/auth/login` | 5 / 15 min | IP **+** normalised email |
+| `POST /api/auth/register` | 3 / hour | IP |
+| `POST /api/auth/refresh` | 30 / 15 min | IP |
+| `POST /api/mt-sync/trades` | 100 / min | API key |
+| ↳ failed key attempts | 10 / 15 min | IP — applied **only after** a key is rejected |
+| everything under `/api` | 300 / min | IP (loose backstop) |
+
+429s route through `errorHandler`, so the body is `{ "error": "…" }` like every other error,
+with `Retry-After` and draft-7 `RateLimit` headers.
+
+**⚠️ The store is in-memory, therefore per-process.** Running a second instance doubles every
+limit. Move to Redis (already in docker-compose, unused) before scaling out.
+
+`bcrypt` cost stays at **12**. It is the reason ~20 concurrent logins can stall the event loop,
+and rate limiting is the mitigation — do not lower it. `login` always runs one bcrypt compare,
+against a dummy hash when the email is unknown, so timing cannot be used to enumerate accounts.
 
 ## ⚠️ The API contract is hand-maintained on both sides
 
@@ -260,10 +330,26 @@ cd frontend
 npm run dev            # → http://localhost:3000
 ```
 
-Docker is **not** a working path today: `backend/Dockerfile` runs `node dist/src/main` (the
-deleted NestJS entry point), `server.ts` hard-binds `127.0.0.1`, compose publishes `4000`
-against an app on `5000`, and `frontend/Dockerfile` copies a `.next/standalone` output that is
-never produced. Fixing all of that is C5.
+### Production build — no Docker
+
+**This project does not use Docker.** The Dockerfiles and `docker-compose.yml` were deleted in
+C5: all three were broken (backend `CMD` invoked the deleted NestJS entry point, the frontend
+image copied a standalone output that was never produced, compose published 4000 against an app
+on 5000 and provisioned a Redis nothing referenced). Do not reintroduce them without a reason.
+
+```bash
+cd backend  && npm run build && npm start   # tsc → dist/, then node dist/server.js
+cd frontend && npm run build && npm start   # next build, then next start
+```
+
+Postgres runs natively — `DATABASE_URL` points at it. Run `npx prisma migrate deploy` before
+starting a built backend.
+
+**`HOST` is the setting that matters when deploying.** It defaults to `127.0.0.1`, which is
+correct locally and refuses connections from other machines. Any platform that routes traffic
+into the process — Railway, Render, Fly, systemd behind nginx — needs `HOST=0.0.0.0`, and they
+set `PORT` themselves. It used to be hardcoded to loopback, which made the app unreachable on
+every one of them.
 
 ---
 

@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { env } from './config/env';
 import { app } from './app';
+import { prisma } from './utils/prisma';
 
-const HOST = '127.0.0.1';
+const HOST = env.HOST;
 const PORT = env.PORT;
 
 const server = app.listen(PORT, HOST, () => {
@@ -13,18 +14,21 @@ const server = app.listen(PORT, HOST, () => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received — shutting down gracefully');
+function shutdown(signal: string): void {
+  console.log(`${signal} received — shutting down gracefully`);
   server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+    // Release the pool rather than leaving it to the process teardown: without
+    // this every restart leaks a Postgres connection until the server times it
+    // out, which matters on a platform that restarts on each deploy.
+    void prisma.$disconnect().finally(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
   });
-});
+}
 
-process.on('SIGINT', () => {
-  console.log('\nSIGINT received — shutting down');
-  server.close(() => process.exit(0));
-});
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection:', reason);
