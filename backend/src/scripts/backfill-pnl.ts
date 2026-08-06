@@ -1,5 +1,5 @@
 /**
- * Backfill pnl and riskReward for closed trades that never received one.
+ * Backfill pnl and both risk:reward metrics for closed trades missing them.
  *
  * Targets: status = CLOSED, pnl IS NULL, exit_price IS NOT NULL.
  *
@@ -18,7 +18,7 @@
 
 import { Prisma, TradeStatus } from '@prisma/client';
 import { prisma } from '../utils/prisma';
-import { computePnl, computeRiskReward, type PnlFailureReason } from '../domain/pnl';
+import { computePnl, plannedRiskReward, realisedRiskReward, type PnlFailureReason } from '../domain/pnl';
 
 interface Options {
   apply: boolean;
@@ -115,16 +115,16 @@ async function main() {
         continue;
       }
 
-      const riskReward =
-        num(trade.riskReward) != null
-          ? null // already set — leave it alone
-          : computeRiskReward({
-              direction: trade.direction === 'BUY' ? 'BUY' : 'SELL',
-              entryPrice: trade.entryPrice,
-              stopLoss: trade.stopLoss,
-              takeProfit: trade.takeProfit,
-              exitPrice: trade.exitPrice,
-            });
+      // Only fill a metric that is missing; never overwrite one already stored.
+      const rrInput = {
+        direction: trade.direction === 'BUY' ? ('BUY' as const) : ('SELL' as const),
+        entryPrice: trade.entryPrice,
+        stopLoss: trade.stopLoss,
+        takeProfit: trade.takeProfit,
+        exitPrice: trade.exitPrice,
+      };
+      const planned = num(trade.plannedRiskReward) != null ? null : plannedRiskReward(rrInput);
+      const realised = num(trade.realisedRiskReward) != null ? null : realisedRiskReward(rrInput);
 
       if (samples.length < 10) {
         samples.push(
@@ -132,7 +132,8 @@ async function main() {
             `${String(trade.lotSize).padStart(7)} lots  ` +
             `${String(trade.entryPrice)}→${String(trade.exitPrice)}  ` +
             `pnl NULL → ${result.net.toFixed(2)} ${trade.account.currency}` +
-            (riskReward ? `  rr → ${riskReward.toFixed(4)}` : ''),
+            (planned ? `  planned rr → ${planned.toFixed(4)}` : '') +
+            (realised ? `  realised rr → ${realised.toFixed(4)}` : ''),
         );
       }
 
@@ -141,7 +142,8 @@ async function main() {
           where: { id: trade.id },
           data: {
             pnl: result.net,
-            ...(riskReward ? { riskReward } : {}),
+            ...(planned ? { plannedRiskReward: planned } : {}),
+            ...(realised ? { realisedRiskReward: realised } : {}),
           },
         });
       }

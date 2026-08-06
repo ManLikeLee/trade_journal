@@ -31,7 +31,7 @@ export function TradeDetailDrawer({ tradeId, onClose }: TradeDetailDrawerProps) 
   const [savingNote, setSavingNote] = useState(false);
 
   const pnl = trade ? Number(trade.pnl ?? 0) : 0;
-  const rr  = trade?.riskReward ? Number(trade.riskReward) : null;
+  const rr  = trade?.realisedRiskReward != null ? Number(trade.realisedRiskReward) : null;
 
   const addNote = async () => {
     if (!noteText.trim() || !tradeId) return;
@@ -105,7 +105,7 @@ export function TradeDetailDrawer({ tradeId, onClose }: TradeDetailDrawerProps) 
                     {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}
                   </p>
                   {rr && (
-                    <p className="text-xs mt-1 opacity-80">R:R  1:{rr.toFixed(2)}</p>
+                    <p className="text-xs mt-1 opacity-80">{rr >= 0 ? '+' : ''}{rr.toFixed(2)}R realised</p>
                   )}
                 </div>
               )}

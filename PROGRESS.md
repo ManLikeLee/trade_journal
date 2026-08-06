@@ -975,6 +975,55 @@ exists to stop.
 
 **Deferred:** 1 item added.
 
+### 2026-08-06 — R:R split into two named metrics (C3 follow-up, user chose option b)
+
+The single `riskReward` field was resolved `takeProfit ?? exitPrice` on write and
+`exitPrice ?? takeProfit` on read. I originally kept the write-path ordering; the user preferred
+the read path, then chose the third option — **two named metrics** — which is the correct answer
+because *neither* ordering fixes the defect. Under either, the column means the plan for some
+rows and the outcome for others, with nothing to tell a caller which it is holding.
+
+**The data proved it.** Recomputing both from stored prices surfaced this row:
+
+```
+XAUUSD SELL  entry 4257.27  SL 4279.69  TP 4133.30  exit 4279.74
+             planned 5.5294        realised -1.0022
+```
+
+A trade stopped out for a full loss stored **5.5294** — its plan — and contributed that to the
+dashboard's "Avg R:R". Losing trades were inflating the headline reward figure.
+
+**Migration `20260806120000_split_risk_reward`** adds both columns, **recomputes** them from
+`entry/stop/take_profit/exit` in SQL, then drops the old one. Recomputed rather than copied: the
+old values are a mix, and copying would carry the ambiguity forward under a name asserting it is
+gone. Verified afterwards with `migrate diff --exit-code` → 0. Of 25 trades, 10 have a planned
+value and 4 a realised one.
+
+**Changed:** `domain/pnl.ts` exports `plannedRiskReward` and `realisedRiskReward` over a shared
+`riskDistance` helper (a stop on the wrong side of entry yields null, not infinity);
+`computeMetrics` returns both; `SORTABLE_FIELDS` and the frontend mirror both;
+`getSummary` returns `avgPlannedRR` and `avgRealisedRR` in place of `avgRR` — planned averages
+positive ratios only, realised includes negatives, which is the entire point of measuring
+outcomes.
+
+**Display fixed as a consequence.** Realised R:R is signed, and the table rendered `1:{value}`,
+which for a stopped-out trade would print `1:-1.00`. Realised is now shown as an R multiple
+(`-1.00R`, colour-coded); planned keeps ratio notation. The dashboard tile shows the realised
+average with the planned one beneath it.
+
+**Verified live** against hand-calculated values — entry 1.1000, stop 1.0900 (risk 100 pips),
+target 1.1300 (reward 300 pips):
+
+| Outcome | Hand | API |
+|---|---|---|
+| stopped out at 1.0900 | planned 3.0000, realised −1.0000 | **3 / −1** |
+| target hit at 1.1300 | planned 3.0000, realised +3.0000 | **3 / 3** |
+| still open | planned 3.0000, realised null | **3 / null** |
+
+`avgPlannedRR` 3, `avgRealisedRR` 1 (mean of −1 and +3); `avgRR` absent from the response.
+`sortBy=plannedRiskReward` and `realisedRiskReward` → 200, `sortBy=riskReward` → **400**, so
+C10's whitelist moved with the rename. `tsc` and lint 0 in both packages.
+
 ---
 
 ## Deferred

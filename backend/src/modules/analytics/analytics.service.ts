@@ -14,7 +14,7 @@
  */
 import { TradeDirection, TradeStatus } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
-import { computeRiskReward } from '../../domain/pnl';
+import { plannedRiskReward, realisedRiskReward } from '../../domain/pnl';
 import { isPriced } from '../../domain/trade-outcome';
 import { BadRequestError } from '../../utils/errors';
 
@@ -93,35 +93,39 @@ function normalizeTrade(trade: Record<string, unknown>) {
     exitPrice: numOrNull(trade.exitPrice),
     stopLoss: numOrNull(trade.stopLoss),
     takeProfit: numOrNull(trade.takeProfit),
-    riskReward: numOrNull(trade.riskReward),
+    plannedRiskReward: numOrNull(trade.plannedRiskReward),
+    realisedRiskReward: numOrNull(trade.realisedRiskReward),
     pnl: numOrNull(trade.pnl),
     closeTime: dateOrNull(trade.closeTime),
   };
 }
 
 /**
- * Risk:reward for a trade, preferring the value computed and stored on write.
+ * Risk:reward, resolved from the stored columns and recomputed only if a row
+ * predates them.
  *
- * The fallback used to be a second, divergent implementation living here: it
- * preferred `exitPrice ?? takeProfit` where the write path preferred
- * `takeProfit ?? exitPrice`, so the same trade reported a different R:R
- * depending on whether you read it from the trades table or from analytics.
- * Both now call the single implementation in domain/pnl.ts.
+ * Two separate metrics, never blended. `avgRR` used to average whatever the
+ * single ambiguous column happened to hold — for a trade with a target that was
+ * the *plan*, so a position stopped out for a full loss still contributed its
+ * planned 5.5:1 to the headline figure. Losing trades were inflating the
+ * average reward.
  */
-function resolveRiskReward(t: ReturnType<typeof normalizeTrade>): number | null {
-  if (t.riskReward != null && Number.isFinite(t.riskReward) && t.riskReward > 0) {
-    return t.riskReward;
-  }
+function resolveRiskReward(
+  t: ReturnType<typeof normalizeTrade>,
+  kind: 'planned' | 'realised',
+): number | null {
+  const stored = kind === 'planned' ? t.plannedRiskReward : t.realisedRiskReward;
+  if (stored != null && Number.isFinite(stored)) return stored;
   if (t.entryPrice == null) return null;
 
-  const rr = computeRiskReward({
-    direction: t.direction === TradeDirection.BUY ? 'BUY' : 'SELL',
+  const input = {
+    direction: t.direction === TradeDirection.BUY ? ('BUY' as const) : ('SELL' as const),
     entryPrice: t.entryPrice,
     stopLoss: t.stopLoss,
     takeProfit: t.takeProfit,
     exitPrice: t.exitPrice,
-  });
-
+  };
+  const rr = kind === 'planned' ? plannedRiskReward(input) : realisedRiskReward(input);
   return rr === null ? null : rr.toNumber();
 }
 
@@ -146,7 +150,8 @@ function emptyStats(totalTrades = 0, unpricedTrades = 0) {
     totalTrades, pricedTrades: 0, unpricedTrades,
     winCount: 0, lossCount: 0, scratchCount: 0, winRate: 0,
     totalPnl: 0, grossWin: 0, grossLoss: 0, avgWin: 0, avgLoss: 0,
-    profitFactor: 0, expectancy: 0, avgRR: 0, maxDrawdown: 0, maxDrawdownPct: 0,
+    profitFactor: 0, expectancy: 0, avgPlannedRR: 0, avgRealisedRR: 0,
+    maxDrawdown: 0, maxDrawdownPct: 0,
   };
 }
 
@@ -177,10 +182,18 @@ export async function getSummary(userId: string, query: AnalyticsQuery = {}) {
   const profitFactor = Number.isFinite(rawPF) ? rawPF : 0;
   const expectancy = decisiveCount > 0 ? (grossWin + grossLossRaw) / decisiveCount : 0;
 
-  const rrValues = normalized
-    .map((t) => resolveRiskReward(t))
+  // Planned averages only positive ratios: a "plan" to lose is not a plan.
+  // Realised includes negatives — that is the whole point of measuring outcomes.
+  const plannedValues = normalized
+    .map((t) => resolveRiskReward(t, 'planned'))
     .filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
-  const avgRR = rrValues.length ? rrValues.reduce((s, v) => s + v, 0) / rrValues.length : 0;
+  const realisedValues = normalized
+    .map((t) => resolveRiskReward(t, 'realised'))
+    .filter((v): v is number => v != null && Number.isFinite(v));
+
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0);
+  const avgPlannedRR = avg(plannedValues);
+  const avgRealisedRR = avg(realisedValues);
 
   const curveTrades = realized
     .filter((t) => t.closeTime != null)
@@ -206,7 +219,8 @@ export async function getSummary(userId: string, query: AnalyticsQuery = {}) {
     avgLoss: parseFloat(avgLoss.toFixed(2)),
     profitFactor: parseFloat(profitFactor.toFixed(3)),
     expectancy: parseFloat(expectancy.toFixed(2)),
-    avgRR: parseFloat(avgRR.toFixed(3)),
+    avgPlannedRR: parseFloat(avgPlannedRR.toFixed(3)),
+    avgRealisedRR: parseFloat(avgRealisedRR.toFixed(3)),
     maxDrawdown: parseFloat(maxDrawdown.toFixed(2)),
     maxDrawdownPct: parseFloat(maxDrawdownPct.toFixed(2)),
   };

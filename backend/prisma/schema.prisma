@@ -110,11 +110,14 @@ model Trade {
   closeTime DateTime? @map("close_time")
 
   // Computed on write (denormalised for query performance)
-  pnl        Decimal? @db.Decimal(18, 2)
-  commission Decimal  @default(0) @db.Decimal(18, 2)
-  swap       Decimal  @default(0) @db.Decimal(18, 2)
-  riskReward Decimal? @map("risk_reward") @db.Decimal(10, 4)
-  pips       Decimal? @db.Decimal(10, 1)
+  pnl                Decimal? @db.Decimal(18, 2)
+  commission         Decimal  @default(0) @db.Decimal(18, 2)
+  swap               Decimal  @default(0) @db.Decimal(18, 2)
+  /// (entry→takeProfit)/(entry→stopLoss). Fixed at entry; null without a target.
+  plannedRiskReward  Decimal? @map("planned_risk_reward") @db.Decimal(10, 4)
+  /// (entry→exitPrice)/(entry→stopLoss). The outcome in units of risk; null while open.
+  realisedRiskReward Decimal? @map("realised_risk_reward") @db.Decimal(10, 4)
+  pips               Decimal? @db.Decimal(10, 1)
 
   status TradeStatus @default(OPEN)
   source TradeSource @default(MANUAL)

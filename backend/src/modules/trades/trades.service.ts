@@ -3,7 +3,7 @@ import { TradeDirection, TradeStatus, TradeSource } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { ForbiddenError, NotFoundError } from '../../utils/errors';
 import type { CreateTradeInput, UpdateTradeInput, TradesQuery, CreateNoteInput } from './trades.schema';
-import { computePnl, computeRiskReward, type PnlFailureReason } from '../../domain/pnl';
+import { computePnl, plannedRiskReward, realisedRiskReward, type PnlFailureReason } from '../../domain/pnl';
 import { hashToken } from '../../utils/token';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -36,17 +36,27 @@ function computeMetrics(t: {
   commission: number;
   swap: number;
   pnl?: number | null;
-}): { pnl: Decimal | null; riskReward: Decimal | null; pnlReason?: PnlFailureReason } {
-  const riskReward = computeRiskReward({
+}): {
+  pnl: Decimal | null;
+  plannedRiskReward: Decimal | null;
+  realisedRiskReward: Decimal | null;
+  pnlReason?: PnlFailureReason;
+} {
+  const rrInput = {
     direction: t.direction,
     entryPrice: t.entryPrice,
     stopLoss: t.stopLoss,
     takeProfit: t.takeProfit,
     exitPrice: t.exitPrice,
-  });
+  };
+  // Two independent metrics; neither falls back to the other.
+  const riskReward = {
+    plannedRiskReward: plannedRiskReward(rrInput),
+    realisedRiskReward: realisedRiskReward(rrInput),
+  };
 
   if (t.pnl != null && Number.isFinite(t.pnl)) {
-    return { pnl: new Decimal(t.pnl), riskReward };
+    return { pnl: new Decimal(t.pnl), ...riskReward };
   }
 
   const result = computePnl(
@@ -63,8 +73,8 @@ function computeMetrics(t: {
   );
 
   return result.ok
-    ? { pnl: result.net, riskReward }
-    : { pnl: null, riskReward, pnlReason: result.reason };
+    ? { pnl: result.net, ...riskReward }
+    : { pnl: null, ...riskReward, pnlReason: result.reason };
 }
 
 function isClosedTrade(exitPrice?: number | null, closeTime?: Date | string | null): boolean {
@@ -137,7 +147,8 @@ export async function createTrade(userId: string, input: CreateTradeInput) {
       commission: new Decimal(input.commission ?? 0),
       swap: new Decimal(input.swap ?? 0),
       pnl: computed.pnl,
-      riskReward: computed.riskReward,
+      plannedRiskReward: computed.plannedRiskReward,
+      realisedRiskReward: computed.realisedRiskReward,
       status: resolvedStatus,
       source: 'MANUAL',
     },
@@ -247,7 +258,8 @@ export async function updateTrade(userId: string, tradeId: string, input: Update
       commission: input.commission != null ? new Decimal(input.commission) : undefined,
       swap: input.swap != null ? new Decimal(input.swap) : undefined,
       pnl: computed.pnl,
-      riskReward: computed.riskReward,
+      plannedRiskReward: computed.plannedRiskReward,
+      realisedRiskReward: computed.realisedRiskReward,
       status: resolvedStatus,
     },
     include: TRADE_INCLUDE,
@@ -363,7 +375,8 @@ export async function syncTrade(
         commission: new Decimal(input.commission ?? 0),
         swap: new Decimal(input.swap ?? 0),
         pnl: pnl ?? computed.pnl,
-        riskReward: computed.riskReward,
+        plannedRiskReward: computed.plannedRiskReward,
+        realisedRiskReward: computed.realisedRiskReward,
         status: isClosed ? TradeStatus.CLOSED : TradeStatus.OPEN,
         source: input.source,
       },
@@ -386,7 +399,8 @@ export async function syncTrade(
       commission: new Decimal(input.commission ?? Number(existing.commission)),
       swap: new Decimal(input.swap ?? Number(existing.swap)),
       pnl: pnl ?? computed.pnl ?? existing.pnl,
-      riskReward: computed.riskReward ?? existing.riskReward,
+      plannedRiskReward: computed.plannedRiskReward ?? existing.plannedRiskReward,
+      realisedRiskReward: computed.realisedRiskReward ?? existing.realisedRiskReward,
       status: isClosed ? TradeStatus.CLOSED : existing.status,
       source: input.source,
     },

@@ -131,9 +131,17 @@ currency is exact in two cases and refused otherwise:
 Refusing is deliberate. The trade form surfaces it and offers a "Realised P&L" field for the
 trader to enter the broker's number instead.
 
-**Risk:reward** uses `takeProfit ?? exitPrice` — a *planning* metric fixed at entry, which must
-not change when a trade closes. There is exactly one implementation; analytics imports it. Two
-divergent copies previously disagreed with each other.
+**Risk:reward is TWO fields, never one.** `plannedRiskReward` = (entry→takeProfit)/(entry→stop),
+fixed at entry, null without a target. `realisedRiskReward` = (entry→exit)/(entry→stop), signed,
+null while open. Neither falls back to the other.
+
+A single field resolved with `??` is ambiguous under *either* ordering — it silently means the
+plan for some rows and the outcome for others, with no way for a caller to tell which. That is
+not hypothetical: a stopped-out XAUUSD trade stored **5.5294**, its plan, and contributed that
+to the dashboard's average reward. Do not re-merge them.
+
+Realised R:R is displayed as an R multiple (`-1.00R`), not `1:x` — ratio notation cannot express
+a loss.
 
 **The frontend preview** (`lib/pnl-preview.ts`) repeats only the formula. The spec *data* is
 fetched from `GET /api/symbol-specs`, so the table cannot drift. The preview is an estimate;

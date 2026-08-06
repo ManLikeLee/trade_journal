@@ -24,7 +24,8 @@ const SORTABLE_COLUMN_IDS = [
   'pnl',
   'lotSize',
   'entryPrice',
-  'riskReward',
+  'plannedRiskReward',
+  'realisedRiskReward',
 ] as const;
 
 type SortableColumnId = (typeof SORTABLE_COLUMN_IDS)[number];
@@ -83,11 +84,21 @@ const columns = [
       );
     },
   }),
-  col.accessor('riskReward', {
-    header: 'R:R',
-    cell: (info) => info.getValue()
-      ? <span className="font-mono text-xs">1:{Number(info.getValue()).toFixed(2)}</span>
-      : <span className="text-muted-foreground text-[11px]">—</span>,
+  col.accessor('realisedRiskReward', {
+    // Realised R:R is signed — a stopped-out trade is about -1 — so it is shown
+    // as an R multiple. The old "1:x" ratio notation cannot express a loss:
+    // it would have rendered "1:-1.00".
+    header: 'R',
+    cell: (info) => {
+      const raw = info.getValue();
+      if (raw == null) return <span className="text-muted-foreground text-[11px]">—</span>;
+      const r = Number(raw);
+      return (
+        <span className={cn('font-mono text-xs tabular-nums', r >= 0 ? 'text-profit' : 'text-loss')}>
+          {r >= 0 ? '+' : ''}{r.toFixed(2)}R
+        </span>
+      );
+    },
   }),
   col.accessor('openTime', {
     header: 'Opened',

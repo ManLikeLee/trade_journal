@@ -15,7 +15,10 @@ export interface Trade {
   openTime: string;
   closeTime: string | null;
   pnl: string | null;
-  riskReward: string | null;
+  /** (entry→takeProfit)/(entry→stopLoss). Fixed at entry; null without a target. */
+  plannedRiskReward: string | null;
+  /** (entry→exitPrice)/(entry→stopLoss). The outcome in units of risk; null while open. */
+  realisedRiskReward: string | null;
   commission: string;
   swap: string;
   status: 'OPEN' | 'CLOSED' | 'CANCELLED';
@@ -69,7 +72,10 @@ export interface AnalyticsSummary {
   avgLoss: number;
   profitFactor: number;
   expectancy: number;
-  avgRR: number;
+  /** Mean planned R:R over trades that had a target. Positive ratios only. */
+  avgPlannedRR: number;
+  /** Mean realised R:R. Includes negatives — a stopped-out trade is about -1. */
+  avgRealisedRR: number;
   maxDrawdown: number;
   maxDrawdownPct: number;
 }

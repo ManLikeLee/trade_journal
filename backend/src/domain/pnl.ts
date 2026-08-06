@@ -153,35 +153,64 @@ export function computePnl(trade: PnlTrade, accountCurrency: string): PnlResult 
 }
 
 /**
- * Planned risk:reward — (entry→target) / (entry→stop).
+ * ─────────────────────────────────────────────────────────────────────────────
+ * RISK:REWARD — TWO METRICS, NOT ONE FIELD
  *
- * Precedence is `takeProfit ?? exitPrice`, deliberately: R:R is a property of
- * the *plan*, fixed at entry, so it must not change the moment a trade closes.
- * The realised outcome is a different metric (R-multiple) and is not this.
+ * There used to be a single `riskReward` resolved with `takeProfit ?? exitPrice`
+ * on the write path and `exitPrice ?? takeProfit` on the read path, so the same
+ * trade reported different values depending on which surface observed it.
  *
- * Two implementations of this used to disagree — the write path preferred
- * takeProfit, analytics preferred exitPrice, so the same trade reported
- * different values depending on which surface you looked at. This is the single
- * implementation; do not add a second.
+ * Picking one precedence does not fix that, it only hides it: under EITHER
+ * ordering the column silently means different things per row. With
+ * `takeProfit` first, a trade with a target reports the plan while one without
+ * reports the outcome. With `exitPrice` first, a closed trade reports the
+ * outcome while an open one reports the plan. One column, two metrics, no way
+ * for a caller to tell which it is holding.
  *
- * Returns null when risk is not positive (no stop, or a stop on the wrong side
- * of entry). The result may be negative when falling back to exitPrice on a
- * losing trade; callers that only want planned ratios filter on `> 0`.
+ * So they are two named fields. Each is null when its inputs are absent, and
+ * neither ever falls back to the other:
+ *
+ *   plannedRiskReward   (entry→takeProfit) / (entry→stopLoss)
+ *                       Fixed when the trade is opened. Null without a target.
+ *                       This is what a trader means by "I take 1:3 setups".
+ *
+ *   realisedRiskReward  (entry→exitPrice) / (entry→stopLoss)
+ *                       What actually happened, in units of the risk taken.
+ *                       Null while the trade is open. Negative on a loss.
+ *
+ * Both require a stop: without one there is no risk denominator, and a ratio
+ * against an unknown risk is meaningless rather than infinite.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
-export function computeRiskReward(trade: RiskRewardTrade): Decimal | null {
+
+function riskDistance(trade: RiskRewardTrade): Decimal | null {
   if (trade.entryPrice == null || trade.stopLoss == null) return null;
-
-  const target = trade.takeProfit ?? trade.exitPrice;
-  if (target == null) return null;
-
   const entry = toDecimal(trade.entryPrice);
   const stop = toDecimal(trade.stopLoss);
-  const goal = toDecimal(target);
-
   const risk = trade.direction === 'BUY' ? entry.minus(stop) : stop.minus(entry);
-  if (risk.lessThanOrEqualTo(0)) return null;
+  // A stop on the wrong side of entry is not a risk of zero, it is nonsense.
+  return risk.lessThanOrEqualTo(0) ? null : risk;
+}
 
+function ratioAgainstRisk(trade: RiskRewardTrade, target: DecimalLike): Decimal | null {
+  const risk = riskDistance(trade);
+  if (risk === null) return null;
+
+  const entry = toDecimal(trade.entryPrice);
+  const goal = toDecimal(target);
   const reward = trade.direction === 'BUY' ? goal.minus(entry) : entry.minus(goal);
 
   return reward.dividedBy(risk).toDecimalPlaces(RR_DP);
+}
+
+/** Planned R:R, fixed at entry. Null without both a stop and a target. */
+export function plannedRiskReward(trade: RiskRewardTrade): Decimal | null {
+  if (trade.takeProfit == null) return null;
+  return ratioAgainstRisk(trade, trade.takeProfit);
+}
+
+/** Realised R:R — the outcome in units of risk taken. Null while open. */
+export function realisedRiskReward(trade: RiskRewardTrade): Decimal | null {
+  if (trade.exitPrice == null) return null;
+  return ratioAgainstRisk(trade, trade.exitPrice);
 }

@@ -43,7 +43,8 @@ export const SORTABLE_FIELDS = [
   'pnl',
   'lotSize',
   'entryPrice',
-  'riskReward',
+  'plannedRiskReward',
+  'realisedRiskReward',
 ] as const;
 
 export const TradesQuerySchema = z.object({

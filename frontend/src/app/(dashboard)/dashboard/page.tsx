@@ -44,7 +44,8 @@ export default function DashboardPage() {
   const winRate = num(summary?.winRate, 0);
   const winCount = num(summary?.winCount, 0);
   const lossCount = num(summary?.lossCount, 0);
-  const avgRR = num(summary?.avgRR, 0);
+  const avgRealisedRR = num(summary?.avgRealisedRR, 0);
+  const avgPlannedRR = num(summary?.avgPlannedRR, 0);
   const expectancy = num(summary?.expectancy, 0);
   const maxDrawdownPct = num(summary?.maxDrawdownPct, 0);
   const maxDrawdown = num(summary?.maxDrawdown, 0);
@@ -92,9 +93,9 @@ export default function DashboardPage() {
           loading={sumLoading}
         />
         <StatCard
-          label="Avg R:R"
-          value={avgRR.toFixed(2)}
-          subValue={`Expectancy $${expectancy.toFixed(2)}`}
+          label="Avg R multiple"
+          value={`${avgRealisedRR >= 0 ? '+' : ''}${avgRealisedRR.toFixed(2)}R`}
+          subValue={`Planned 1:${avgPlannedRR.toFixed(2)} · Expectancy $${expectancy.toFixed(2)}`}
           loading={sumLoading}
         />
         <StatCard

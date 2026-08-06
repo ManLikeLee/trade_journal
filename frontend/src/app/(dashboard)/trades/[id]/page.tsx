@@ -118,7 +118,8 @@ export default function TradeDetailPage({ params }: { params: { id: string } }) 
   }
 
   const pnl = Number(trade.pnl ?? 0);
-  const rr = trade.riskReward ? Number(trade.riskReward) : null;
+  const plannedRR = trade.plannedRiskReward != null ? Number(trade.plannedRiskReward) : null;
+  const realisedRR = trade.realisedRiskReward != null ? Number(trade.realisedRiskReward) : null;
   const hasPnl = trade.pnl !== null;
   const grossPnl = pnl + Number(trade.commission ?? 0) + Number(trade.swap ?? 0);
 
@@ -194,7 +195,10 @@ export default function TradeDetailPage({ params }: { params: { id: string } }) 
           <div className="text-center">
             <p className="text-[10.5px] font-medium opacity-70 mb-1">Risk : Reward</p>
             <p className="text-xl font-medium">
-              {rr ? `1 : ${rr.toFixed(2)}` : '—'}
+              {realisedRR != null ? `${realisedRR >= 0 ? '+' : ''}${realisedRR.toFixed(2)}R` : '—'}
+            </p>
+            <p className="text-[10px] opacity-70 mt-0.5">
+              {plannedRR != null ? `planned 1 : ${plannedRR.toFixed(2)}` : 'no target set'}
             </p>
           </div>
         </div>
