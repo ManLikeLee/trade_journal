@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { isoDate } from '../../utils/schema';
 import { authenticate } from '../../middleware/auth';
 import * as analyticsService from './analytics.service';
 import { generateInsights } from './insights.service';
@@ -8,10 +9,19 @@ export const analyticsRouter = Router();
 
 analyticsRouter.use(authenticate);
 
+/**
+ * `from` and `to` were bare strings. `analytics.service` then ran them through a
+ * parser that returned null on failure and simply dropped the filter, so
+ * `?from=garbage` answered **200 with all-time data presented as filtered**.
+ *
+ * That is worse than the 500 fixed in C10: an error tells the user something
+ * went wrong, whereas this states a wrong number confidently on a page whose
+ * whole purpose is reporting their P&L.
+ */
 const QuerySchema = z.object({
   accountId: z.string().optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
+  from: isoDate().optional(),
+  to: isoDate().optional(),
 });
 
 // GET /api/analytics/summary

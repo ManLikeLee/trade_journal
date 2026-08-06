@@ -16,6 +16,7 @@ import { TradeDirection, TradeStatus } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { computeRiskReward } from '../../domain/pnl';
 import { isPriced } from '../../domain/trade-outcome';
+import { BadRequestError } from '../../utils/errors';
 
 export interface AnalyticsQuery {
   accountId?: string;
@@ -29,6 +30,28 @@ function numOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Parse a date filter, or throw.
+ *
+ * KEPT rather than deleted now that the router validates with isoDate(), but its
+ * behaviour is inverted. It used to return null on an unparseable value, which
+ * silently dropped the filter and returned all-time data labelled as filtered —
+ * a confidently wrong number on a P&L report.
+ *
+ * As a belt-and-braces guard it must fail loudly: a service is exported and can
+ * be called from a script, a job, or a future route that forgets to validate.
+ * Silently widening a date range must never be reachable again by any path.
+ */
+function parseDateFilter(value: unknown, field: 'from' | 'to'): Date | null {
+  if (value == null) return null;
+  const parsed = new Date(value as string);
+  if (isNaN(parsed.getTime())) {
+    throw new BadRequestError(`Invalid ${field} date`);
+  }
+  return parsed;
+}
+
+/** Null-safe parse for values already in the database, which cannot be invalid. */
 function dateOrNull(v: unknown): Date | null {
   if (v == null) return null;
   const d = new Date(v as string);
@@ -42,8 +65,8 @@ async function getClosedTrades(userId: string, query: AnalyticsQuery) {
   });
   const accountIds = userAccounts.map((a) => a.id);
 
-  const from = dateOrNull(query.from);
-  const to = dateOrNull(query.to);
+  const from = parseDateFilter(query.from, 'from');
+  const to = parseDateFilter(query.to, 'to');
 
   return prisma.trade.findMany({
     where: {

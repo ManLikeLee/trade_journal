@@ -1,7 +1,5 @@
 import { z } from 'zod';
-
-const isoDate = () =>
-  z.string().datetime({ offset: true, message: 'Must be a valid ISO 8601 date string' });
+import { isoDate } from '../../utils/schema';
 
 export const CreateTradeSchema = z.object({
   accountId: z.string().min(1),

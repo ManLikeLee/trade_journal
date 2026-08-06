@@ -867,6 +867,56 @@ npm ci     backend 0 | frontend 0        (CI uses npm ci, not npm install)
 
 **Deferred:** 2 items added.
 
+### 2026-08-06 — C4 part 2: analytics date filters validated
+
+Promoted out of Deferred. `analytics.router.ts` declared `from`/`to` as bare
+`z.string().optional()`, and `analytics.service` ran them through a parser that returned null on
+failure — silently dropping the filter. Reproduced live before the fix on a seeded account of 3
+July trades:
+
+| Request | Before | |
+|---|---|---|
+| `?from=2026-07-01T00:00:00.000Z` | 200, 3 trades | correct |
+| `?from=2026-08-01T00:00:00.000Z` | 200, 0 trades | correct — July excluded |
+| **`?from=garbage`** | **200, 3 trades, $300** | **filter silently dropped, all-time data returned as filtered** |
+
+Worse than the 500 C10 fixed: an error says something went wrong; this states a wrong number
+confidently on a P&L report.
+
+**Correction to the earlier Deferred note:** it implied any invalid date silently widened. Not
+so — date-only `?from=2026-08-01` **worked correctly** (`new Date()` parses it), returning 0.
+Only genuinely unparseable strings were dropped. The bug was narrower than recorded, and the
+live reproduction is what showed it.
+
+**Changed:** new `utils/schema.ts` holding the single `isoDate()` definition, imported by both
+`trades.schema.ts` and `analytics.router.ts` — it lived inside the trades module, and having
+analytics import another module's schema would breach the `router → service → schema`
+boundary. Widening it later for a date-only form updates every router at once (point 8).
+
+**Point 7 — `dateOrNull` kept, but inverted.** Renamed `parseDateFilter` and it now **throws**
+`BadRequestError` instead of returning null. Deleting it would have been defensible, but a
+service is exported and reachable from a script, a job, or a future route that forgets to
+validate; the failure mode being guarded against is a silently wrong number, so the guard must
+fail loudly. A separate `dateOrNull` remains for values read *out of* the database, which
+cannot be invalid.
+
+**Behaviour change worth stating:** date-only `?from=2026-08-01` now returns **400** on
+analytics, where it previously worked. That is deliberate — it matches `/api/trades` since C10,
+and a date without an offset means different instants in different timezones, which this
+codebase is already naive about (M2). Documented in `utils/schema.ts` with the widening path.
+
+**Verified live:** `?from=garbage` and `?to=nonsense` → **400** with a field-level message;
+valid ISO ranges → **200** and correct filtering (July range 3 trades, August range 0); no
+params → 200. All four other analytics endpoints (`equity-curve`, `by-day`, `by-symbol`,
+`insights`) → **400** on garbage too.
+
+**Part 1 re-verified** after the folder move — 8 streak fixtures, all correct, and the three
+cases that matter produce **no streak insight at all**: all-nulls, all-zeros, and 30
+hand-logged unpriced trades. `summary` and `insights` agreed on a seeded 3-priced/4-unpriced
+account: both reported 3 and 4.
+
+`npx tsc --noEmit` exit 0 both packages; backend lint 0.
+
 ### 2026-08-06 — C5: deployable without Docker
 
 **The user does not want Docker in this project**, so the task was reshaped: rather than repair
@@ -984,12 +1034,6 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   therefore reads as a 3-trade losing streak. The alternative — treating an unknown result as a
   break — would understate real streaks. Chosen deliberately and asserted in the fixtures;
   revisit if it reads wrong to a trader.
-- **Analytics silently ignores an invalid `from`/`to` instead of rejecting it.** C10 fixed the
-  trades query; `analytics.router.ts`'s own `QuerySchema` still declares `from`/`to` as bare
-  `z.string().optional()`. It does not 500 — `analytics.service.ts:29` runs them through a
-  `dateOrNull()` guard — but that means `?from=garbage` returns **HTTP 200 with all-time
-  data**, presented as though the requested date filter had applied. Verified live. Wrong
-  numbers stated confidently is arguably worse than an error; fix by reusing `isoDate()`.
 - **`from`/`to` on `/api/trades` now require a full ISO 8601 timestamp with offset**, so a
   natural date-only range (`?from=2026-08-01`) returns 400. Nothing sends these today. If a
   date-range picker is built later, either send `T00:00:00.000Z` or widen the schema with an
