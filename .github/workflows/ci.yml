@@ -42,8 +42,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Compiling is what proves the artefact the Dockerfile runs actually
-      # exists. `npm start` points at dist/server.js.
+      # Compiling proves the artefact `npm start` runs actually exists:
+      # the start script is `node dist/server.js`.
       - name: Build
         run: npm run build
 
