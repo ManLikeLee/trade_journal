@@ -74,7 +74,8 @@ export function clearAuthCookies(res: Response): void {
 
 /** The refresh token from the cookie, or undefined. Never read from the body. */
 export function readRefreshCookie(req: Request): string | undefined {
-  const value = req.cookies?.[REFRESH_COOKIE];
+  const cookies = req.cookies as Record<string, string | undefined> | undefined;
+  const value = cookies?.[REFRESH_COOKIE];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 

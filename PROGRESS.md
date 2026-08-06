@@ -46,7 +46,8 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
 - [x] **C11** — Purge `.env`, `backend/dist/`, `frontend/.next/` from git; add `.env*` to
       `.gitignore`; rotate any exposed value.
       *Done 2026-08-05. `.git` 207 MB → 480 KB; secret rotated and old token proven rejected.*
-- [ ] **C12** — Add CI (`tsc --noEmit` + lint + tests on PR) and an ESLint config.
+- [x] **C12** — Add CI (`tsc --noEmit` + lint + tests on PR) and an ESLint config.
+      *Done 2026-08-06. All steps green locally. Docker job non-blocking until C5 — see log.*
 
 ## HIGH
 
@@ -785,6 +786,71 @@ and exits cleanly.
 
 **Deferred:** 1 item added.
 
+### 2026-08-06 — C12: the gate
+
+**New:** `.github/workflows/ci.yml`, `.github/dependabot.yml`, `backend/.eslintrc.json`,
+`frontend/.eslintrc.json`, `.prettierrc.json`, `.prettierignore`.
+Added `eslint`, `@typescript-eslint/*` and `prettier` to both packages; `engines: node >=20` on
+both; `lint`, `format:check` and `test` scripts on both.
+
+**CI runs on `pull_request` and `push` to main**, in three jobs:
+
+| Job | Steps |
+|---|---|
+| Backend | `npm ci` (cached) → `prisma generate` → `tsc --noEmit` → lint → **build** → test |
+| Frontend | `npm ci` (cached) → `tsc --noEmit` → lint → **build** → test |
+| Docker | build both images — **non-blocking**, see below |
+
+`prisma generate` is required before `tsc`: the client is generated code, and without it a
+clean checkout fails to typecheck. Two steps beyond the brief: **`npm run build` in both jobs**,
+because typechecking does not compile every route and the build is the strongest cheap proof
+the app is shippable — the backend build also demonstrates it emits `dist/server.js`, which is
+*not* what `backend/Dockerfile` invokes.
+
+**⚠️ The Docker job is `continue-on-error: true` and must not stay that way.** The frontend
+image cannot build: `next.config.js` never sets `output: 'standalone'`, so `.next/standalone`
+is never produced, and `public/` does not exist — both `COPY` instructions fail. That is C5,
+descoped because this project runs without Docker. Left blocking, CI would be permanently red
+and would stop being read, which is worse than no CI. **Remove `continue-on-error` the moment
+C5 lands.** Docker is not installed on this machine, so this is the one job that could not be
+run locally.
+
+**Lint: 0 errors in both packages.** Backend rules all run at **error**; 7 pre-existing errors
+were fixed rather than suppressed, since they were small and real: an unused import, a
+`prefer-const`, two `Decimal`s in template literals, two unsafe `any` accesses reading
+`req.body`/`req.cookies`, and `no-namespace` on the Express `Request` augmentation — that last
+resolved with `allowDeclarations: true`, which is the idiomatic answer for module augmentation
+rather than an inline disable.
+
+**Frontend burn-down — 22 pre-existing errors set to `warn`, per the task's instruction not to
+mass-fix.** Counts recorded in `frontend/.eslintrc.json` next to the rules:
+
+| Rule | Count | Notes |
+|---|---:|---|
+| `@typescript-eslint/no-explicit-any` | **32** | the audit counted 29 |
+| `@typescript-eslint/no-floating-promises` | **16** | 8 of them in the dead `useTradeSocket.ts` (H13) |
+| `@typescript-eslint/no-unused-vars` | **5** | incl. the dead `mode` prop and `formatDuration` (H13) |
+| `no-console` | **1** | down from the audit's 30; C6 removed the rest |
+
+Raise each to `error` as its count reaches zero. The backend already runs all four at `error`,
+so they cannot regress there. One genuine error was fixed: an unescaped apostrophe in JSX.
+
+**Prettier config only — no repo-wide format**, as instructed. `prettier --check` currently
+fails across the codebase; a one-shot format belongs in its own commit so it does not bury
+every future diff.
+
+**`tailwindcss`, `postcss` and `autoprefixer` moved to `devDependencies`** — they were shipping
+in the production install.
+
+**Verified locally, every step:**
+```
+BACKEND    prisma generate 0 | tsc 0 | lint 0 (0 errors, 9 warnings) | build 0 | test 0
+FRONTEND   tsc 0 | lint 0 (0 errors, 54 warnings) | build 0 (compiled successfully) | test 0
+npm ci     backend 0 | frontend 0        (CI uses npm ci, not npm install)
+```
+
+**Deferred:** 2 items added.
+
 ---
 
 ## Deferred
@@ -818,6 +884,13 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   `DATABASE_URL`. Not rotated: the database listens on `localhost:5432` only, so it is not
   remotely reachable, and changing it means altering the Postgres role and updating `.env`
   together. Worth doing if that database is ever exposed beyond this machine.
+- **One-shot Prettier format commit.** Config is in place but nothing is formatted;
+  `prettier --check .` fails repo-wide. Run `npx prettier --write .` in its own commit, touching
+  nothing else, so the reformat does not contaminate future diffs or `git blame`.
+- **CI has no database, so nothing integration-tests the API.** The jobs typecheck, lint and
+  build; they never start the server or touch Postgres. H4 should add a `services: postgres`
+  block and run the suite against it — that is what would catch a C1-class defect, which
+  typechecking cannot see by construction.
 - **Refresh-token reuse detection is still absent** (audit S-5 / M13). C9 makes a stolen token
   unrecoverable from a database dump, but a token stolen *in transit or from the client* is
   still usable until it rotates, and replay after rotation fails silently rather than revoking

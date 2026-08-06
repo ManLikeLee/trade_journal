@@ -373,7 +373,7 @@ export default function SettingsPage() {
           <code className="block bg-muted/50 rounded-md px-3 py-2 text-[11px] font-mono border border-border">
             POST {API_BASE_URL}/mt-sync/trades
           </code>
-          <p className="text-[11px]">Authentication: <code className="font-mono text-[11px]">X-Api-Key</code> header with your account's API key.</p>
+          <p className="text-[11px]">Authentication: <code className="font-mono text-[11px]">X-Api-Key</code> header with your account&apos;s API key.</p>
           <p className="text-[11px]">The <code className="font-mono">ticket</code> field is used as the idempotency key. Duplicate POSTs update existing trades rather than creating duplicates.</p>
         </div>
       </section>

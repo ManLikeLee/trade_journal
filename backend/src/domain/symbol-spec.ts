@@ -116,7 +116,7 @@ const TRAILING_SUFFIXES = ['MICRO', 'PRO', 'ECN', 'RAW', 'STP', 'M', 'C', 'I', '
 export function normaliseSymbol(raw: string): string {
   // Everything from the first decoration onwards is a broker suffix:
   // '.cash', '.pro', '_i', '#', '-ECN'
-  let s = raw.trim().toUpperCase().split(/[._#\-/\s]/)[0] ?? '';
+  const s = raw.trim().toUpperCase().split(/[._#\-/\s]/)[0] ?? '';
 
   if (SPECS.has(s)) return s;
   if (ALIASES[s]) return ALIASES[s];

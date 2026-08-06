@@ -1,7 +1,7 @@
 import { Decimal } from '@prisma/client/runtime/library';
 import { TradeDirection, TradeStatus, TradeSource } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
-import { ForbiddenError, NotFoundError, BadRequestError } from '../../utils/errors';
+import { ForbiddenError, NotFoundError } from '../../utils/errors';
 import type { CreateTradeInput, UpdateTradeInput, TradesQuery, CreateNoteInput } from './trades.schema';
 import { computePnl, computeRiskReward, type PnlFailureReason } from '../../domain/pnl';
 import { hashToken } from '../../utils/token';

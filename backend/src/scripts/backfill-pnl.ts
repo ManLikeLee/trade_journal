@@ -130,7 +130,7 @@ async function main() {
         samples.push(
           `  ${trade.symbol.padEnd(12)} ${trade.direction.padEnd(4)} ` +
             `${String(trade.lotSize).padStart(7)} lots  ` +
-            `${trade.entryPrice}→${trade.exitPrice}  ` +
+            `${String(trade.entryPrice)}→${String(trade.exitPrice)}  ` +
             `pnl NULL → ${result.net.toFixed(2)} ${trade.account.currency}` +
             (riskReward ? `  rr → ${riskReward.toFixed(4)}` : ''),
         );

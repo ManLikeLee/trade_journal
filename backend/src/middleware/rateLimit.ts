@@ -69,7 +69,8 @@ export const loginLimiter = rateLimit({
   windowMs: 15 * MINUTE,
   limit: 5,
   keyGenerator: (req: Request) => {
-    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const body = req.body as { email?: unknown } | undefined;
+    const email = String(body?.email ?? '').trim().toLowerCase();
     // ipKeyGenerator normalises IPv6 to a /56 subnet; a bare req.ip lets an
     // attacker with an IPv6 allocation cycle addresses for free.
     return `${ipKeyGenerator(req.ip ?? '')}:${email}`;
