@@ -302,6 +302,21 @@ before any C3 change and re-checked after everything including `--apply`:
 **Not verified:** the browser. The preview, the new Realised P&L field and the "can't estimate"
 message need a visual check — click-path handed over.
 
+**Both jobs green.** Two follow-ups from the run's annotations:
+
+*Node 20 deprecation.* The runner reported `actions/checkout@v4` and `actions/setup-node@v4`
+target Node 20 and were being forced onto Node 24. Checking rather than assuming turned up
+something worse than the warning implied: **Node 20 reached end of life on 2026-04-30**, so CI
+was pinned to an unsupported runtime and `engines: >=20` permitted one. Actions bumped to
+**v7** (latest for both — Dependabot's github-actions ecosystem would propose it anyway), CI
+`node-version` to **22**, and `engines` to **>=22**, which also matches the local v22.15.0 so CI
+and the developer machine cannot drift into different runtime behaviour.
+
+*8 no-console warnings.* Expected — these are the recorded burn-down: 7 in `server.ts`'s
+startup banner and 1 in `requestLogger.ts`. They are warnings by design and go away with **H8**
+(structured logging), which replaces both with a real logger. They are deliberately not
+suppressed: a disable comment would hide the count that H8 is meant to drive to zero.
+
 **Deferred:** 3 items added.
 
 ### 2026-08-05 — C3 follow-up: blank Realised P&L submitted 0, overriding the calculation
