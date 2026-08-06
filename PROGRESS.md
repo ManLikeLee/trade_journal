@@ -513,11 +513,28 @@ and the old one is rejected (401). Auth flows re-checked after the narrowing —
 register → `/auth/me` → refresh → refreshed token → login all pass.
 `npx tsc --noEmit` exit 0 in both packages. Test users deleted; 19 trades, 2 accounts intact.
 
-**Still outstanding — C9.** The key remains **plaintext in `accounts.api_key`**, and refresh
-tokens are plaintext in `sessions.refresh_token`. C7 closes the API surface; a database dump,
-leaked backup or over-permissive read role still yields every key. C9 hashes both at rest with
-a unique index on the hash. `apiKeyLast4` is derived from the plaintext today and will need to
-become a stored column when C9 lands.
+**Was outstanding, now resolved — C9.** At the time of C7 the key was still plaintext in
+`accounts.api_key`. **C9 has since removed that column entirely**: only a SHA-256 digest is
+stored, and `apiKeyLast4` became the stored column this entry predicted it would need to be.
+
+**Re-verified 2026-08-06** (after C9 and the folder move), live rather than from the code:
+`GET /api/accounts`, `GET /api/trades/:id` and `GET /api/trades` were each scanned recursively
+for a key named `apiKey` at any depth — **absent from all three**. `trade.account` exposes only
+`broker, currency, id, name, platform`; the trades list carries no account relation at all;
+`GET /api/accounts` returns `hasApiKey` + `apiKeyLast4` and **not** `apiKeyHash`. The raw key
+appears only in the create and regenerate responses.
+
+**Mask fixed.** The card rendered `'•'.repeat(28) + last4`, implying a 32-character key — wrong
+against the original 36-char UUID and more wrong against C9's 43-char token. The client cannot
+know the real length any more (only the last 4 are stored), so the mask no longer claims one:
+`•••• •••• •••• last4`.
+
+**Over-fetch re-audit after C9's new queries.** Seven reads still fetch full rows
+(`auth.login`, three in `accounts.service`, four in `trades.service` notes/sync,
+`analytics.getClosedTrades`). None reaches a client unmapped: every account row exits through
+`toPublicAccount`, which strips both `apiKey` and `apiKeyHash` by destructuring, and the live
+responses above confirm it. They are a blast-radius and performance concern rather than a leak
+— the trades ones are M7's `include`-stripping work and analytics is H1's.
 
 **Not verified:** the browser. The masked card, the confirmation dialog, the reveal-once panel
 and the create flow need a visual check.

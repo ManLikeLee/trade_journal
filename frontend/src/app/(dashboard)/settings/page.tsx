@@ -111,7 +111,13 @@ function AccountCard({ account }: { account: any }) {
         </div>
         <div className="flex items-center gap-2">
           <code className="flex-1 text-[11px] font-mono bg-background rounded-md px-2 py-1.5 border border-border truncate">
-            {account.hasApiKey ? `${'•'.repeat(28)}${account.apiKeyLast4 ?? ''}` : 'Not generated'}
+            {/* Fixed-width mask: the client cannot know the key's real length —
+                only the last 4 are stored, since C9 keeps just a hash — so the
+                mask must not imply one. It previously rendered 28 dots against
+                what was a 36-char UUID, and is now a 43-char token. */}
+            {account.hasApiKey
+              ? `•••• •••• •••• ${account.apiKeyLast4 ?? '????'}`
+              : 'Not generated'}
           </code>
           <button
             onClick={() => setConfirmRegen(true)}
