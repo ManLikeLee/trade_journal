@@ -931,6 +931,10 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   wants a live URL in the README. Railway or Render for the backend plus Vercel for the
   frontend build from source and need no Docker; both need `HOST=0.0.0.0`, a managed Postgres
   `DATABASE_URL`, a real `JWT_SECRET`, and `NEXT_PUBLIC_API_URL` pointing at the deployed API.
+- **A warm npm cache can hide a broken lockfile.** `npm ci` locally is not proof the lockfile
+  installs: an unpublished or yanked version still resolves from cache. Verify with
+  `npm ci --cache "$(mktemp -d)"` on a fresh clone when touching dependencies, which is what
+  CI actually does.
 - **One-shot Prettier format commit.** Config is in place but nothing is formatted;
   `prettier --check .` fails repo-wide. Run `npx prettier --write .` in its own commit, touching
   nothing else, so the reformat does not contaminate future diffs or `git blame`.
