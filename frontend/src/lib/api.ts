@@ -28,9 +28,33 @@ export const api = axios.create({
 });
 
 // Attach access token to every request
-api.interceptors.request.use((config) => {
-  // Read from memory, not localStorage: the token is deliberately not persisted.
-  const token = getAccessToken();
+/**
+ * Attach the access token, waiting for the session to be restored if necessary.
+ *
+ * The token is memory-only, so on a cold load there is a window where it does
+ * not exist yet. Firing regardless produced a 401 that the response interceptor
+ * then had to recover — visible as `GET /api/accounts 401` from the Sidebar,
+ * which renders outside the dashboard's checkingAuth gate.
+ *
+ * Waiting here fixes it for *every* caller rather than per component: anything
+ * mounted before bootstrap finishes simply joins the in-flight refresh. That
+ * refresh is a shared singleton, so this costs one request no matter how many
+ * queries are waiting.
+ */
+api.interceptors.request.use(async (config) => {
+  const url = String(config.url ?? '');
+
+  // Auth endpoints carry the cookie, not a bearer token. Skipping them also
+  // prevents recursion: refreshAccessToken() calls POST /auth/refresh.
+  if (url.includes('/auth/')) return config;
+
+  let token = getAccessToken();
+  if (!token) {
+    // Lazy import: auth.ts imports this module, so a static import is circular.
+    const { useAuthStore } = await import('./auth');
+    token = await useAuthStore.getState().refreshAccessToken();
+  }
+
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });

@@ -681,6 +681,14 @@ visual flash: the inline script in `app/layout.tsx` already applies the class be
 paint — this only catches React up to the DOM. Verified the server now renders the light-mode
 markup deterministically.
 
+*One 401 survived the layout gate.* `Sidebar` calls `useAccounts()` and renders **outside**
+`<main>`, so gating only `children` never covered it. Rather than blank the chrome too, the
+request interceptor in `lib/api.ts` now awaits the session when no token is present yet: any
+caller mounted before bootstrap finishes joins the shared in-flight refresh, so it costs one
+request no matter how many queries are waiting, and it covers components added later without
+each needing an `enabled` flag. Auth endpoints are skipped, which also prevents recursion since
+`refreshAccessToken()` itself calls `POST /auth/refresh`.
+
 **Not verified:** the browser itself. DevTools checks are in the handover.
 
 **Deferred:** 2 items added.
