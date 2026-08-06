@@ -700,6 +700,21 @@ without that, the next account to sign in on the same tab would briefly render t
 user's trades and balances from cache before refetching. That is a cross-account data exposure
 in a shared-browser scenario, not just a staleness bug.
 
+*401 burst after logout.* Logout worked, but the console filled with 401s. Cause: clearing the
+query cache **while the dashboard was still mounted** made every active query refetch
+immediately, moments after the session was destroyed — each refetch then triggered a refresh
+attempt that also 401d. The deeper problem was that the client could not distinguish "no token
+yet, ask the cookie" from "no token because the user just signed out"; the refresh cookie is
+httpOnly, so asking the server was the only way to find out. Added a `sessionEnded` flag in
+`access-token.ts`, set on logout and on any failed refresh, cleared on login/register/successful
+refresh. The request interceptor now fails fast with a `CanceledError` instead of hitting the
+network, and the response interceptor stops attempting recovery. `handleLogout` also navigates
+before clearing the cache, so the queries are unmounted by the time it happens.
+
+One 401 remains on a cold load while signed out — the bootstrap asking whether a session exists.
+That is unavoidable without reading an httpOnly cookie, and it is how the app discovers it has
+no session.
+
 **Not verified:** the browser itself. DevTools checks are in the handover.
 
 **Deferred:** 2 items added.

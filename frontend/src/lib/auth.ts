@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { api } from './api';
-import { setAccessToken } from './access-token';
+import { setAccessToken, markSessionActive, markSessionEnded } from './access-token';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -83,6 +83,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
     const { data } = await api.post('/auth/login', { email, password });
     purgeLegacyCredentials();
     setAccessToken(data.accessToken);
+    markSessionActive();
     set({
       accessToken: data.accessToken,
       user: data.user ?? null,
@@ -95,6 +96,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
     const { data } = await api.post('/auth/register', { email, password, name });
     purgeLegacyCredentials();
     setAccessToken(data.accessToken);
+    markSessionActive();
     set({
       accessToken: data.accessToken,
       user: data.user ?? null,
@@ -110,6 +112,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
     } finally {
       purgeLegacyCredentials();
       setAccessToken(null);
+      // Stops every in-flight and subsequent request from trying to refresh a
+      // session we just destroyed.
+      markSessionEnded();
       set({ user: null, accessToken: null, isAuthenticated: false, checkingAuth: false });
     }
   },
@@ -122,6 +127,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
         // No body: the refresh token travels as an httpOnly cookie.
         const { data } = await api.post('/auth/refresh');
         setAccessToken(data.accessToken);
+        markSessionActive();
         set({
           accessToken: data.accessToken,
           user: data.user ?? null,
@@ -130,6 +136,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
         return data.accessToken as string;
       } catch {
         setAccessToken(null);
+        markSessionEnded();
         set({ user: null, accessToken: null, isAuthenticated: false });
         return null;
       } finally {

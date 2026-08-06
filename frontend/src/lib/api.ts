@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getAccessToken } from './access-token';
+import { getAccessToken, isSessionEnded } from './access-token';
 
 function normalizeBaseUrl(raw?: string) {
   const value = (raw ?? '').trim();
@@ -50,6 +50,12 @@ api.interceptors.request.use(async (config) => {
 
   let token = getAccessToken();
   if (!token) {
+    // Signed out, or a refresh already failed: fail fast rather than firing a
+    // request we know will 401 and a refresh we know will fail. Without this,
+    // logging out produced a burst of 401s as every mounted query refetched.
+    if (isSessionEnded()) {
+      throw new axios.CanceledError('No active session');
+    }
     // Lazy import: auth.ts imports this module, so a static import is circular.
     const { useAuthStore } = await import('./auth');
     token = await useAuthStore.getState().refreshAccessToken();
@@ -77,6 +83,9 @@ api.interceptors.response.use(
     if (url.includes('/auth/refresh') || url.includes('/auth/logout')) {
       return Promise.reject(error);
     }
+
+    // Nothing to recover with once the session is known to be gone.
+    if (isSessionEnded()) return Promise.reject(error);
 
     if (error.response?.status === 401 && !original?._retry) {
       original._retry = true;

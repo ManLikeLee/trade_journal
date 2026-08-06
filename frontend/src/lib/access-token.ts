@@ -13,6 +13,31 @@
 
 let accessToken: string | null = null;
 
+/**
+ * True once we know there is no session: after logout, or after a refresh
+ * attempt has failed.
+ *
+ * Without it the client cannot tell "no token yet, ask the cookie" from "no
+ * token because the user just signed out", so every request after logout tried
+ * to refresh and produced a burst of 401s. The refresh cookie is httpOnly, so
+ * asking the server is otherwise the only way to find out.
+ */
+let sessionEnded = false;
+
+export function isSessionEnded(): boolean {
+  return sessionEnded;
+}
+
+/** Call when a session is known to be gone: logout, or a failed refresh. */
+export function markSessionEnded(): void {
+  sessionEnded = true;
+}
+
+/** Call when a session is established: login, register, successful refresh. */
+export function markSessionActive(): void {
+  sessionEnded = false;
+}
+
 export function getAccessToken(): string | null {
   return accessToken;
 }

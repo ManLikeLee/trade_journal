@@ -44,8 +44,11 @@ export function Sidebar() {
     setSigningOut(true);
     try {
       await logout();
-      queryClient.clear();
+      // Navigate first: clearing the cache while the dashboard is still mounted
+      // makes every active query refetch immediately, moments after the session
+      // was destroyed.
       router.replace('/login');
+      queryClient.clear();
     } finally {
       setSigningOut(false);
     }
