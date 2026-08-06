@@ -659,6 +659,28 @@ Verified: `127.0.0.1:3000/` and `localhost:3000/` both terminate in **3 hops**
 `/login?from=%2Fdashboard`; `/dashboard` **with** the `tj_session` cookie returns **200**,
 proving the hint cookie does its job.
 
+**Two further fixes after the user opened the app:**
+
+*401 storm and double refresh on every load.* The backend log showed six `401`s, then **two**
+`POST /refresh` (two token rotations), then six successful retries. The app was recovering, but
+the dashboard's TanStack queries were racing `bootstrap()`: they fired before any access token
+existed, the interceptor recovered each one, and its refresh raced the bootstrap already in
+flight. `checkingAuth` existed for precisely this and **nothing consumed it** — an audit finding
+in its own right. `(dashboard)/layout.tsx` now holds children behind a skeleton until bootstrap
+resolves, so one refresh per load and no 401s on the happy path.
+
+*Hydration failure — pre-existing, not caused by C6.* `theme-provider.tsx` called
+`getInitialTheme()` from `useState`'s initialiser, i.e. **during render**. The server has no
+`localStorage` and returned `'light'`; a client with a stored `'dark'` returned `'dark'`. The
+Sidebar renders `ThemeToggle`, which emits a different icon *and* aria-label per theme, so the
+client's first render did not match the server HTML and React discarded the entire tree
+("The server HTML was replaced with client content in `<#document>`"). Initial state is now
+`'light'` on both sides with the stored preference adopted in a mount effect, and the
+apply-effect is gated on `mounted` so the placeholder cannot overwrite a stored `'dark'`. No
+visual flash: the inline script in `app/layout.tsx` already applies the class before first
+paint — this only catches React up to the DOM. Verified the server now renders the light-mode
+markup deterministically.
+
 **Not verified:** the browser itself. DevTools checks are in the handover.
 
 **Deferred:** 2 items added.

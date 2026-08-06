@@ -13,7 +13,16 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function getInitialTheme(): Theme {
+/**
+ * Read the persisted theme. Browser only — never call this during render.
+ *
+ * Calling it from useState's initialiser is what caused
+ * "Hydration failed because the initial UI does not match": the server has no
+ * localStorage and returns 'light', while a client with a stored 'dark'
+ * returned 'dark', so ThemeToggle rendered a different icon and aria-label than
+ * the server HTML and React tore down the whole tree.
+ */
+function readStoredTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
 
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -23,14 +32,27 @@ function getInitialTheme(): Theme {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(getInitialTheme);
+  // Must match what the server renders. The real preference is adopted after
+  // mount, below. There is no visual flash: the inline script in app/layout.tsx
+  // has already applied the `dark` class to <html> before first paint — this
+  // state is only catching React up to what the DOM already shows.
+  const [theme, setThemeState] = useState<Theme>('light');
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setThemeState(readStoredTheme());
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    // Gated on `mounted`, otherwise the placeholder 'light' from the first
+    // render would be written to storage and overwrite a stored 'dark'.
+    if (!mounted) return;
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
     root.style.colorScheme = theme;
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
+  }, [theme, mounted]);
 
   const setTheme = useCallback((nextTheme: Theme) => setThemeState(nextTheme), []);
   const toggleTheme = useCallback(
