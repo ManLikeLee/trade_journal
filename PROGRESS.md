@@ -838,6 +838,43 @@ would not compile. Migration `20260806010000` names it in its guard, so anyone r
 pre-C9 backup needs it to work; on an already-migrated database it detects the missing columns
 and exits cleanly.
 
+**Two checks added 2026-08-07** that the original C9 pass did not run:
+
+*Migration-history drift — the audit's `express_refactor` hazard.* The earlier check compared
+the **live database** to `schema.prisma`, which by construction cannot detect a migration
+history that no longer reproduces the schema. Replaying every migration from scratch into a
+shadow database:
+
+```
+npx prisma migrate diff --from-migrations ./prisma/migrations \
+  --to-schema-datamodel ./prisma/schema.prisma --shadow-database-url <shadow>
+→ exit 0, "No difference detected."
+```
+
+The history is sound, including `20260514000000_express_refactor` with its five hand-written
+constructs and the `ALTER TYPE "TradeSource" ADD VALUE 'MT_SYNC'` inside a `DO` block. The audit
+called that a plausible failed deploy; it replays cleanly on **PostgreSQL 16.13**. The caveat
+still stands for older majors — `ALTER TYPE … ADD VALUE` was prohibited inside a transaction
+before PG 12 — so this is verified for this environment, not universally.
+
+*The analytics composite index had been asserted, never proven.* C9 measured the `api_key_hash`
+lookup but only claimed the others. On 40,000 seeded trades, since removed:
+
+| Query | Plan | Time |
+|---|---|---|
+| analytics, **with** `(account_id, status, close_time)` | **Index Scan**, no Sort node | **131 ms** |
+| same, index scans disabled | Seq Scan + **Sort spilling 4.9 MB to disk** | 763 ms |
+
+~5.8x faster, and the real win is eliminating a **disk-based external merge sort** — the thing
+that actually falls over at scale, because `close_time` had no index at all before.
+
+*A finding on the second composite.* `(account_id, open_time DESC)` was **not** chosen while one
+account owned ~100% of the table: the legacy `trades_open_time_idx` serves a backward scan with
+`LIMIT 20` faster. Redistributed across two accounts at 50/50 — the shape a multi-user install
+actually has — the planner switched to `trades_account_id_open_time_idx` with no Sort node. The
+index is right for the target shape; a single-account dataset is simply not the case it exists
+for.
+
 **Deferred:** 1 item added.
 
 ### 2026-08-06 — C12: the gate
