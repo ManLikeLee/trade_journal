@@ -72,9 +72,11 @@ No tests, no CI, no lint config exist, so typecheck is the only automated gate t
 - [ ] **H11** — Form accessibility pass: `htmlFor`/`id`, `aria-invalid`, `aria-describedby`,
       render all field errors, surface server error details.
 - [ ] **H12** — Rewrite the README to describe the application that exists.
-- [ ] **H13** — Delete dead code: `useTradeSocket`, `socket.io-client`, `pips`, the `mode`
-      prop, `accountNumber` in the sync payload, the MetaMask suppressor, the localhost
-      fallback, `src/app/page.tsx`.
+- [ ] **H13** — Delete dead code: ~~`useTradeSocket`~~, ~~`socket.io-client`~~, `pips`, the
+      `mode` prop, `accountNumber` in the sync payload, the MetaMask suppressor,
+      ~~the localhost fallback~~, `src/app/page.tsx`.
+      *Partially done: the socket hook + dependency removed 2026-08-07 (3 CVEs); the localhost
+      fallback went with C6.*
 
 ### 2026-08-04 — C2: endpoint path mismatches
 
@@ -1024,6 +1026,43 @@ target 1.1300 (reward 300 pips):
 `sortBy=plannedRiskReward` and `realisedRiskReward` → 200, `sortBy=riskReward` → **400**, so
 C10's whitelist moved with the rename. `tsc` and lint 0 in both packages.
 
+### 2026-08-07 — Dependency triage: 10 Dependabot PRs, and the update none of them proposed
+
+**Merged:** #2 (backend minor-and-patch, 6 updates) and #7 (frontend minor-and-patch, 18).
+**Closed:** #3, #4, #5, #6, #9, #11 — six majors, all failing CI.
+**Left open deliberately:** #8 recharts 2→3 and #10 date-fns 3→4.
+
+**Correction to my own advice.** I called all four CI-green PRs "low risk, safe to merge". Two
+of them are **major** bumps of libraries whose output is visual — recharts renders both charts,
+date-fns formats every date and the trade durations. Green CI means they compile; nothing in CI
+renders a chart. I only caught it when the merge conflicted and I read the diff. They stay open
+for a visual check, one at a time.
+
+**`npm audit` found what Dependabot never proposed.** `next` was **CRITICAL** with an in-range
+fix, but no PR existed for it: `open-pull-requests-limit: 5` saturated both ecosystems on the
+first run and silently queued the rest. A cap that hides a critical security update is worse
+than the noise it prevents — raised to 10.
+
+| | critical | high | moderate | total |
+|---|---:|---:|---:|---:|
+| start | 1 | 13 | 1 | **15** |
+| after next@14.2.35 + group PRs | 0 | 12 | 1 | 13 |
+| after deleting dead code | 0 | 10 | 0 | **10** |
+
+**Three advisories were removed by deleting code that did nothing.** `engine.io-client`,
+`socket.io-parser` and `ws` all came from `socket.io-client`, imported only by
+`useTradeSocket.ts` — a hook connecting to `localhost:4000`, a port nothing has ever listened
+on, for a Socket.io server that does not exist in the backend. Deleted both, plus the stale
+`NEXT_PUBLIC_WS_URL` it needed. Shared bundle 87.2 → 87.6 kB (the group PR's updates offset the
+saving), lint warnings 54 → 45.
+
+**Next.js 14 is out of security support** — `14.2.35` is the last 14.2.x, and the remaining ~20
+advisories are only fixed in ≥15.5.21. Deliberately **not** upgrading now; see Deferred for the
+reasoning and the trigger.
+
+**Verified:** `tsc`, `lint`, `build` all 0 in both packages; both lockfiles install from a
+**cold cache** on a clean clone (516 / 303 packages).
+
 ---
 
 ## Deferred
@@ -1062,6 +1101,15 @@ Unrelated problems found while working on a scoped task. Not fixed, recorded her
   wants a live URL in the README. Railway or Render for the backend plus Vercel for the
   frontend build from source and need no Docker; both need `HOST=0.0.0.0`, a managed Postgres
   `DATABASE_URL`, a real `JWT_SECRET`, and `NEXT_PUBLIC_API_URL` pointing at the deployed API.
+- **Next.js 14 → 15/16 upgrade, gated on deployment.** `14.2.35` is the final 14.2.x; ~20
+  advisories are fixed only in ≥15.5.21. **Not urgent today**: the app is localhost-only,
+  undeployed, and uses *none* of the vulnerable surface — verified 0 usages of `next/image`,
+  Server Actions, `rewrites` and `i18n`, which is what almost every advisory targets. It
+  becomes a hard blocker the moment anything is publicly reachable. Sequence it **after H4**:
+  a framework major with no test suite is the exact pattern this audit exists to correct. Note
+  Next 15 makes route `params` a Promise, which would *reverse* the fix made in C6.
+- **recharts 2→3 (#8) and date-fns 3→4 (#10) are open and need a visual check**, not a merge
+  button. Both are majors affecting rendered output; CI can only prove they compile.
 - **A warm npm cache can hide a broken lockfile.** `npm ci` locally is not proof the lockfile
   installs: an unpublished or yanked version still resolves from cache. Verify with
   `npm ci --cache "$(mktemp -d)"` on a fresh clone when touching dependencies, which is what
