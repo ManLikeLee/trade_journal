@@ -578,8 +578,27 @@ cannot cycle addresses for free.
 **Also fixed (item 5):** `login` returned early when no user matched, skipping bcrypt, so
 "unknown email" answered in ~1 ms against ~250 ms for "wrong password" — a clean oracle for
 which addresses hold accounts. It now always performs one comparison, against a dummy hash
-computed once at startup. Measured: **504 ms vs 554 ms**, a difference inside run-to-run
-variance, against a ~5000× gap before.
+computed once at startup.
+
+**Re-measured 2026-08-07 through the live API** (the original figure came from timing bcrypt
+directly, which is weaker evidence). 20 requests per group, each to a distinct email so the
+IP+email limiter never trips — 20 users seeded directly in the database, since the register
+limiter allows only 3/hour:
+
+| Path | n | min | median | max | mean |
+|---|---:|---:|---:|---:|---:|
+| known email + wrong password | 20 | 289 ms | **318 ms** | 395 ms | 329 ms |
+| unknown email (dummy hash) | 20 | 295 ms | **323 ms** | 582 ms | 342 ms |
+| *pre-fix* unknown email (lookup only, no bcrypt) | 20 | 0.8 ms | **1.4 ms** | 52 ms | — |
+
+Medians differ by 5 ms in ~320 ms (1.5%) and the ranges overlap almost entirely. Against the
+pre-fix path the gap was **~230×**.
+
+*The first run of this measurement was wrong and was thrown away*: the `cd` that generated the
+bcrypt hash silently failed, so 20 users were seeded with an **empty** `password_hash`, and
+`bcrypt.compare` against an empty string returns false immediately. That produced a 26 ms vs
+326 ms split — an apparent timing oracle in the opposite direction, entirely an artefact of the
+harness. Re-seeded with a real 60-char `$2b$12$` hash and re-run.
 
 **Helmet (item 6)** configured explicitly; two defaults overridden:
 - `crossOriginResourcePolicy: 'cross-origin'` — the default `same-origin` would have blocked
